@@ -181,7 +181,7 @@ export class GroqAIClient {
   async generateChatResponse(userMessage: string) {
     try {
       const prompt = `
-        You are a helpful AI assistant for QuantPredict Pro, a stock prediction and analysis platform.
+        You are a helpful AI assistant for StockPilot, a stock prediction and analysis platform.
         You can help users with:
         - Understanding stock analysis features
         - Explaining technical indicators (RSI, MACD, Bollinger Bands, etc.)

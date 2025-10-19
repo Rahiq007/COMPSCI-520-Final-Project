@@ -1,15 +1,14 @@
-# QuantPredictPro
+# StockPilot
 
 <div align="center">
 
-![QuantPredictPro Logo](https://img.shields.io/badge/QuantPredictPro-Stock%20Analysis-blue?style=for-the-badge)
+![StockPilot Logo](https://img.shields.io/badge/StockPilot-Stock%20Analysis-blue?style=for-the-badge)
 
 **AI-Powered Stock Analysis Platform**
 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Website](https://img.shields.io/badge/Website-Live-success)](https://www.quant-predict-pro.com/)
 
 </div>
 
@@ -17,9 +16,9 @@
 
 ## 🎯 Overview
 
-QuantPredictPro is a cutting-edge web application that democratizes access to institutional-grade stock analysis. Built with modern web technologies, it provides real-time market insights, AI-powered predictions, and comprehensive sentiment analysis—all without requiring user registration or personal information.
+StockPilot is a cutting-edge web application that democratizes access to institutional-grade stock analysis. Built with modern web technologies, it provides real-time market insights, AI-powered predictions, and comprehensive sentiment analysis—all without requiring user registration or personal information.
 
-### Why QuantPredictPro?
+### Why StockPilot?
 
 - **🔓 No Registration Required** - Instant access without creating an account
 - **🎁 Completely Free** - No subscriptions, no hidden fees
@@ -366,12 +365,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## ⚠️ Disclaimer
 
-**Investment Risk Notice:** All investments involve risk, including the potential loss of principal. QuantPredictPro provides analytical tools and predictions for informational purposes only and should not be considered as personalized investment advice. Always conduct your own research and consult with qualified financial professionals before making investment decisions.
+**Investment Risk Notice:** All investments involve risk, including the potential loss of principal. StockPilot provides analytical tools and predictions for informational purposes only and should not be considered as personalized investment advice. Always conduct your own research and consult with qualified financial professionals before making investment decisions.
 
 ---
 
 <div align="center">
 
-[⬆ back to top](#quantpredictpro)
+[⬆ back to top](#StockPilot)
 
 </div>

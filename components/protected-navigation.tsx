@@ -70,7 +70,7 @@ export default function ProtectedNavigation() {
           <div className="flex items-center space-x-8">
             <Link href="/" className="flex items-center space-x-2">
               <Brain className="h-8 w-8 text-blue-600" />
-              <span className="font-bold text-xl text-gray-900">QuantPredict Pro</span>
+              <span className="font-bold text-xl text-gray-900">StockPilot</span>
             </Link>
           </div>
 

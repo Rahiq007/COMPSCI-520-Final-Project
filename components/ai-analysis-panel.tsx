@@ -501,37 +501,6 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                     </div>
                   </CardContent>
                 </Card>
-
-                {/* Feedback Section */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-gray-50 rounded-lg border">
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-medium text-gray-700">Was this analysis helpful?</span>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => provideFeedback(5)}
-                        className="flex items-center gap-1"
-                      >
-                        <ThumbsUp className="h-3 w-3" />
-                        <span>Yes</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => provideFeedback(1)}
-                        className="flex items-center gap-1"
-                      >
-                        <ThumbsDown className="h-3 w-3" />
-                        <span>No</span>
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 flex items-center gap-2">
-                    <Clock className="h-3 w-3" />
-                    <span>Generated: {new Date().toLocaleString()}</span>
-                  </div>
-                </div>
               </div>
             )}
           </div>

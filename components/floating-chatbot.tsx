@@ -29,7 +29,7 @@ export default function FloatingChatbot() {
       const greeting: Message = {
         id: "greeting",
         role: "assistant",
-        content: "👋 Hello! I'm your QuantPredict Pro assistant. I can help you with questions about stock analysis, market data, technical indicators, and more. How can I assist you today?",
+        content: "👋 Hello! I'm your StockPilot assistant. I can guide you through the platform, explain its features, and help you understand any technical terms or tools you come across.",
         timestamp: new Date(),
       }
       setMessages([greeting])
@@ -123,7 +123,7 @@ export default function FloatingChatbot() {
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Bot className="h-5 w-5" />
-                AI Assistant
+                StockPilot
               </CardTitle>
               <Button
                 variant="ghost"

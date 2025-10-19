@@ -184,7 +184,7 @@ export default function StockDashboard() {
         <div className="text-center space-y-2">
           <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 flex items-center justify-center gap-2 flex-wrap">
             <Brain className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            QuantPredict Pro
+            StockPilot
             <Badge variant="outline" className="text-green-600 border-green-600 text-xs sm:text-sm">
               AI-Enhanced
             </Badge>
@@ -216,7 +216,7 @@ export default function StockDashboard() {
                     : "Viewing live cryptocurrency market data with trending topics and latest news"}
                 </CardDescription>
               </div>
-              <Button
+              {/* <Button
                 onClick={toggleMode}
                 variant={mode === "crypto" ? "default" : "outline"}
                 size="lg"
@@ -228,7 +228,7 @@ export default function StockDashboard() {
               >
                 <Bitcoin className="mr-2 h-4 w-4" />
                 {mode === "stock" ? "Switch to Crypto" : "Switch to Stocks"}
-              </Button>
+              </Button> */}
             </div>
           </CardHeader>
           {mode === "stock" && (
@@ -446,13 +446,12 @@ export default function StockDashboard() {
                 </ErrorBoundary>
 
                 {/* AI-Powered Features Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* AI Trading Signals */}
+
+                {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <ErrorBoundary>
                     <AITradingSignals stockData={analysisData} />
                   </ErrorBoundary>
 
-                  {/* Predictive Alerts */}
                   <ErrorBoundary>
                     <PredictiveAlerts
                       ticker={analysisData.ticker}
@@ -460,7 +459,7 @@ export default function StockDashboard() {
                       volatility={analysisData.risk?.volatility || 0.2}
                     />
                   </ErrorBoundary>
-                </div>
+                </div> */}
 
                 {/* AI News Summarizer */}
                 <ErrorBoundary>
@@ -468,9 +467,9 @@ export default function StockDashboard() {
                 </ErrorBoundary>
 
                 {/* AI Portfolio Optimizer */}
-                <ErrorBoundary>
+                {/* <ErrorBoundary>
                   <AIPortfolioOptimizer />
-                </ErrorBoundary>
+                </ErrorBoundary> */}
 
                 {/* Detailed Analysis Tabs */}
                 <Tabs defaultValue="technical" className="space-y-4">

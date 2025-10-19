@@ -63,19 +63,19 @@ export class MultiSourceStockClient {
     const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000)
 
     // Try sources in order of preference
-    if (this.finnhub) {
-      try {
-        const data = await this.finnhub.getCandles(
-          symbol,
-          "D",
-          Math.floor(startDate.getTime() / 1000),
-          Math.floor(endDate.getTime() / 1000),
-        )
-        return this.normalizeFinnhubCandles(data)
-      } catch (error) {
-        console.warn("Finnhub historical data failed:", error)
-      }
-    }
+    // if (this.finnhub) {
+    //   try {
+    //     const data = await this.finnhub.getCandles(
+    //       symbol,
+    //       "D",
+    //       Math.floor(startDate.getTime() / 1000),
+    //       Math.floor(endDate.getTime() / 1000),
+    //     )
+    //     return this.normalizeFinnhubCandles(data)
+    //   } catch (error) {
+    //     console.warn("Finnhub historical data failed:", error)
+    //   }
+    // }
 
     if (this.twelveData) {
       try {

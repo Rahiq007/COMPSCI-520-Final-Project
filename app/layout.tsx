@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/toaster"
 import FloatingChatbot from "@/components/floating-chatbot"
 
 export const metadata: Metadata = {
-  title: "QuantPredictPro - Stock Analyzer",
+  title: "StockPilot - Stock Analyzer",
   description: "AI-powered stock analysis and prediction platform for informed investment decisions.",
   generator: "v0.dev",
   icons: {

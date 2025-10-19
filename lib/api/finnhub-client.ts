@@ -22,15 +22,15 @@ export class FinnhubClient {
     return response.json()
   }
 
-  async getCandles(symbol: string, resolution: string, from: number, to: number) {
-    const response = await fetch(
-      `${this.baseUrl}/stock/candle?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}&token=${this.apiKey}`,
-    )
-    if (!response.ok) {
-      throw new Error(`Finnhub API error: ${response.statusText}`)
-    }
-    return response.json()
-  }
+  // async getCandles(symbol: string, resolution: string, from: number, to: number) {
+  //   const response = await fetch(
+  //     `${this.baseUrl}/stock/candle?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}&token=${this.apiKey}`,
+  //   )
+  //   if (!response.ok) {
+  //     throw new Error(`Finnhub API error: ${response.statusText}`)
+  //   }
+  //   return response.json()
+  // }
 
   async getNews(symbol: string, from: string, to: string) {
     const response = await fetch(
