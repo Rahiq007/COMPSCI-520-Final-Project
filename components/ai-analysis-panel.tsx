@@ -28,6 +28,8 @@ import {
   AlertTriangle,
   HelpCircle,
   Lightbulb,
+  ExternalLink,
+  Search,
   RefreshCw,
   Send,
 } from "lucide-react"
@@ -40,12 +42,19 @@ interface AIAnalysisPanelProps {
   onAnalysisComplete?: (analysis: any) => void
 }
 
+interface SearchResult {
+  title: string
+  url: string
+  description: string
+}
+
 interface ChatMessage {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "search"
   content: string
   timestamp: Date
   model?: string
+  searchResults?: SearchResult[]
 }
 
 const DEFAULT_DISCLAIMER_TEXT =
@@ -215,16 +224,41 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
 
       const data = await response.json()
 
-      // Add AI response
-      const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: data.response || "Sorry, I couldn't generate a response.",
-        timestamp: new Date(),
-        model: data.model,
-      }
+      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date()
+      const baseId = Date.now().toString()
+      const searchResults: SearchResult[] = Array.isArray(data.searchResults)
+        ? (data.searchResults as Array<{ title?: string; url?: string; description?: string }>)
+            .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
+            .map((result) => ({
+              title: result.title as string,
+              url: result.url as string,
+              description: typeof result.description === "string" ? result.description : "",
+            }))
+        : []
 
-      setMessages((prev) => [...prev, aiMessage])
+      setMessages((prev) => {
+        const updatedMessages = [...prev]
+
+        if (searchResults.length > 0) {
+          updatedMessages.push({
+            id: `${baseId}-search`,
+            role: "search",
+            content: "",
+            timestamp,
+            searchResults,
+          })
+        }
+
+        updatedMessages.push({
+          id: `${baseId}-assistant`,
+          role: "assistant",
+          content: data.response || "Sorry, I couldn't generate a response.",
+          timestamp,
+          model: data.model,
+        })
+
+        return updatedMessages
+      })
     } catch (err: any) {
       console.error("Chat error:", err)
       setChatError(err.message || "Failed to get AI response")
@@ -694,6 +728,49 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
               {messages.map((message) => {
                 const alignmentClass = message.role === "user" ? "ml-8" : "mr-8"
 
+                if (message.role === "search") {
+                  return (
+                    <div key={message.id} className={`${alignmentClass} mb-8`}>
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 shadow-md overflow-hidden">
+                        <div className="px-6 py-4 border-b border-blue-100">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <Search className="h-5 w-5 text-blue-600" />
+                            </div>
+                            <div>
+                              <div className="font-semibold text-blue-900">Latest Web Insights</div>
+                              <div className="text-xs text-blue-700">
+                                Search findings · {message.timestamp.toLocaleTimeString()}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="px-6 py-5 space-y-4">
+                          {message.searchResults?.map((result, index) => (
+                            <div key={`${result.url}-${index}`} className="bg-white rounded-lg border border-blue-100 p-4 shadow-sm">
+                              <a
+                                href={result.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                              >
+                                <span>
+                                  {index + 1}. {result.title}
+                                </span>
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                              {result.description && (
+                                <p className="text-xs text-gray-600 mt-2 leading-relaxed">{result.description}</p>
+                              )}
+                              <p className="text-[11px] text-gray-400 mt-1 truncate">{result.url}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+
                 if (message.role === "assistant") {
                   const { hasDisclaimer, disclaimerText, sanitizedContent } = extractDisclaimerBlock(message.content)
                   const effectiveDisclaimer = disclaimerText || (hasDisclaimer ? DEFAULT_DISCLAIMER_TEXT : null)
@@ -764,7 +841,7 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                           <div className="flex items-center justify-between text-xs text-gray-500">
                             <div className="flex items-center gap-2">
                               <Activity className="h-3 w-3" />
-                              <span>Powered by Groq AI - Real-time Analysis</span>
+                              <span>Powered by {message.model||"Groq AI"} - Real-time Analysis</span>
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="flex items-center gap-1">
@@ -906,10 +983,6 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
         </CardContent>
         <CardFooter className="bg-gray-50 border-t">
           <div className="flex items-center justify-between w-full text-xs text-gray-500">
-            <div className="flex items-center gap-2">
-              <Brain className="h-3 w-3" />
-              <span>Powered by Groq Llama 3.1 - Professional Financial Analysis</span>
-            </div>
             <div className="flex items-center gap-2">
               <Activity className="h-3 w-3" />
               <span>Real-time responses</span>
