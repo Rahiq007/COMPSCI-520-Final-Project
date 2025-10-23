@@ -1,8 +1,11 @@
 "use client"
 
 import type React from "react"
+import ReactMarkdown from "react-markdown"
+import type { Components as ReactMarkdownComponents } from "react-markdown"
+import remarkGfm from "remark-gfm"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,6 +28,8 @@ import {
   AlertTriangle,
   HelpCircle,
   Lightbulb,
+  ExternalLink,
+  Search,
   RefreshCw,
   Send,
 } from "lucide-react"
@@ -37,12 +42,68 @@ interface AIAnalysisPanelProps {
   onAnalysisComplete?: (analysis: any) => void
 }
 
+interface SearchResult {
+  title: string
+  url: string
+  description: string
+}
+
 interface ChatMessage {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "search"
   content: string
   timestamp: Date
   model?: string
+  searchResults?: SearchResult[]
+}
+
+const DEFAULT_DISCLAIMER_TEXT =
+  "This analysis is for educational purposes only and not personalized financial advice."
+
+const extractDisclaimerBlock = (content: string) => {
+  const paragraphs = content.split(/\n{2,}/)
+  const remaining: string[] = []
+  let hasDisclaimer = false
+  let disclaimerText: string | null = null
+  let captureNextParagraph = false
+
+  for (const paragraph of paragraphs) {
+    const trimmed = paragraph.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    if (!hasDisclaimer && /disclaimer/i.test(trimmed)) {
+      hasDisclaimer = true
+      const withoutMarkdown = trimmed.replace(/\*\*/g, "")
+      const extracted = withoutMarkdown.replace(/^.*disclaimer[:\s-]*/i, "").trim()
+
+      if (extracted) {
+        disclaimerText = extracted
+        captureNextParagraph = false
+      } else {
+        captureNextParagraph = true
+      }
+      continue
+    }
+
+    if (captureNextParagraph) {
+      const cleaned = trimmed.replace(/\*\*/g, "").trim()
+      if (cleaned) {
+        disclaimerText = cleaned
+      }
+      captureNextParagraph = false
+      continue
+    }
+
+    remaining.push(paragraph)
+  }
+
+  return {
+    hasDisclaimer,
+    disclaimerText,
+    sanitizedContent: remaining.join("\n\n").trim(),
+  }
 }
 
 export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete }: AIAnalysisPanelProps) {
@@ -65,6 +126,59 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
     `What are the growth prospects for ${ticker.toUpperCase()}?`,
     `What technical indicators suggest about ${ticker.toUpperCase()}?`,
   ]
+
+  const markdownComponents = useMemo<ReactMarkdownComponents>(
+    () => ({
+      h2: ({ node, ...props }) => (
+        <h2 {...props} className="text-xl font-semibold text-blue-900 mt-8 mb-4" />
+      ),
+      h3: ({ node, ...props }) => (
+        <h3 {...props} className="text-lg font-semibold text-blue-900 mt-6 mb-3 flex items-center gap-2" />
+      ),
+      h4: ({ node, ...props }) => (
+        <h4 {...props} className="text-base font-semibold text-blue-800 mt-4 mb-2" />
+      ),
+      p: ({ node, ...props }) => <p {...props} className="text-gray-800 leading-relaxed text-sm mb-4" />,
+      strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-gray-900" />,
+      ul: ({ node, ordered, ...props }) => <ul {...props} className="my-4 space-y-3 list-none p-0" />,
+      ol: ({ node, ordered, ...props }) => (
+        <ol {...props} className="my-4 space-y-3 list-decimal pl-6 text-gray-700 leading-relaxed text-sm" />
+      ),
+      li: ({ node, ordered, index, children, ...props }) => {
+        if (ordered) {
+          return (
+            <li {...props} className="text-gray-700 leading-relaxed text-sm">
+              {children}
+            </li>
+          )
+        }
+
+        return (
+          <li {...props} className="flex items-start gap-3 text-gray-700 leading-relaxed text-sm">
+            <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
+            <div className="flex-1">{children}</div>
+          </li>
+        )
+      },
+      blockquote: ({ node, ...props }) => (
+        <blockquote {...props} className="border-l-4 border-blue-200 pl-4 italic text-gray-600 my-4" />
+      ),
+      a: ({ node, ...props }) => (
+        <a {...props} className="text-blue-600 underline hover:text-blue-700 transition-colors" rel="noreferrer" />
+      ),
+      table: ({ node, ...props }) => (
+        <div className="overflow-x-auto my-4">
+          <table {...props} className="min-w-full text-sm text-left border border-gray-200" />
+        </div>
+      ),
+      thead: ({ node, ...props }) => <thead {...props} className="bg-gray-100" />,
+      th: ({ node, ...props }) => (
+        <th {...props} className="px-4 py-2 text-gray-700 font-semibold border-b border-gray-200" />
+      ),
+      td: ({ node, ...props }) => <td {...props} className="px-4 py-2 border-b border-gray-100 text-gray-700" />,
+    }),
+    [],
+  )
 
   const handleSuggestedQuestion = useCallback(
     (question: string) => {
@@ -110,16 +224,41 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
 
       const data = await response.json()
 
-      // Add AI response
-      const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: data.response || "Sorry, I couldn't generate a response.",
-        timestamp: new Date(),
-        model: data.model,
-      }
+      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date()
+      const baseId = Date.now().toString()
+      const searchResults: SearchResult[] = Array.isArray(data.searchResults)
+        ? (data.searchResults as Array<{ title?: string; url?: string; description?: string }>)
+            .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
+            .map((result) => ({
+              title: result.title as string,
+              url: result.url as string,
+              description: typeof result.description === "string" ? result.description : "",
+            }))
+        : []
 
-      setMessages((prev) => [...prev, aiMessage])
+      setMessages((prev) => {
+        const updatedMessages = [...prev]
+
+        if (searchResults.length > 0) {
+          updatedMessages.push({
+            id: `${baseId}-search`,
+            role: "search",
+            content: "",
+            timestamp,
+            searchResults,
+          })
+        }
+
+        updatedMessages.push({
+          id: `${baseId}-assistant`,
+          role: "assistant",
+          content: data.response || "Sorry, I couldn't generate a response.",
+          timestamp,
+          model: data.model,
+        })
+
+        return updatedMessages
+      })
     } catch (err: any) {
       console.error("Chat error:", err)
       setChatError(err.message || "Failed to get AI response")
@@ -501,6 +640,37 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Feedback Section */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-gray-50 rounded-lg border">
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium text-gray-700">Was this analysis helpful?</span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => provideFeedback(5)}
+                        className="flex items-center gap-1"
+                      >
+                        <ThumbsUp className="h-3 w-3" />
+                        <span>Yes</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => provideFeedback(1)}
+                        className="flex items-center gap-1"
+                      >
+                        <ThumbsDown className="h-3 w-3" />
+                        <span>No</span>
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <Clock className="h-3 w-3" />
+                    <span>Generated: {new Date().toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -555,150 +725,147 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                 </div>
               )}
 
-              {messages.map((message) => (
-                <div key={message.id} className={`${message.role === "user" ? "ml-8" : "mr-8"} mb-8`}>
-                  {message.role === "assistant" ? (
-                    // Enhanced AI Response Design
-                    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                      {/* Header */}
-                      <div className="bg-gradient-to-r from-purple-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-100">
-                        <div className="flex items-center justify-between">
+              {messages.map((message) => {
+                const alignmentClass = message.role === "user" ? "ml-8" : "mr-8"
+
+                if (message.role === "search") {
+                  return (
+                    <div key={message.id} className={`${alignmentClass} mb-8`}>
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 shadow-md overflow-hidden">
+                        <div className="px-6 py-4 border-b border-blue-100">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 bg-purple-100 rounded-lg">
-                              <Brain className="h-5 w-5 text-purple-600" />
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <Search className="h-5 w-5 text-blue-600" />
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-gray-900">AI Financial Analyst</span>
-                                {message.model && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs bg-white border-purple-200 text-purple-700"
-                                  >
-                                    {message.model}
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                Professional Market Analysis • {message.timestamp.toLocaleTimeString()}
+                              <div className="font-semibold text-blue-900">Latest Web Insights</div>
+                              <div className="text-xs text-blue-700">
+                                Search findings · {message.timestamp.toLocaleTimeString()}
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                            <span className="text-xs text-gray-500">Live Analysis</span>
-                          </div>
+                        </div>
+                        <div className="px-6 py-5 space-y-4">
+                          {message.searchResults?.map((result, index) => (
+                            <div key={`${result.url}-${index}`} className="bg-white rounded-lg border border-blue-100 p-4 shadow-sm">
+                              <a
+                                href={result.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                              >
+                                <span>
+                                  {index + 1}. {result.title}
+                                </span>
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                              {result.description && (
+                                <p className="text-xs text-gray-600 mt-2 leading-relaxed">{result.description}</p>
+                              )}
+                              <p className="text-[11px] text-gray-400 mt-1 truncate">{result.url}</p>
+                            </div>
+                          ))}
                         </div>
                       </div>
+                    </div>
+                  )
+                }
 
-                      {/* Content */}
-                      <div className="p-6">
-                        <div className="prose max-w-none">
-                          <div className="space-y-5">
-                            {/* Disclaimer Section */}
-                            {message.content.includes("Disclaimer") && (
-                              <div className="bg-amber-50 border-l-4 border-amber-400 p-6 rounded-r-lg mb-8">
+                if (message.role === "assistant") {
+                  const { hasDisclaimer, disclaimerText, sanitizedContent } = extractDisclaimerBlock(message.content)
+                  const effectiveDisclaimer = disclaimerText || (hasDisclaimer ? DEFAULT_DISCLAIMER_TEXT : null)
+                  const markdownContent = sanitizedContent || (hasDisclaimer ? "" : message.content)
+                  const hasContent = Boolean(markdownContent && markdownContent.trim())
+
+                  return (
+                    <div key={message.id} className={`${alignmentClass} mb-8`}>
+                      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-purple-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-100">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-purple-100 rounded-lg">
+                                <Brain className="h-5 w-5 text-purple-600" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-gray-900">AI Financial Analyst</span>
+                                  {message.model && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs bg-white border-purple-200 text-purple-700"
+                                    >
+                                      {message.model}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Professional Market Analysis - {message.timestamp.toLocaleTimeString()}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                              <span className="text-xs text-gray-500">Live Analysis</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6">
+                          <div className="space-y-6">
+                            {effectiveDisclaimer && (
+                              <div className="bg-amber-50 border-l-4 border-amber-400 p-6 rounded-r-lg">
                                 <div className="flex items-start gap-3">
                                   <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
                                   <div>
                                     <h4 className="font-semibold text-amber-800 mb-2">Important Disclaimer</h4>
-                                    <p className="text-sm text-amber-700 leading-relaxed">
-                                      This analysis is for educational purposes only and not personalized financial
-                                      advice.
-                                    </p>
+                                    <p className="text-sm text-amber-700 leading-relaxed">{effectiveDisclaimer}</p>
                                   </div>
                                 </div>
                               </div>
                             )}
 
-                            {/* Main Content with Enhanced Formatting */}
-                            <div className="space-y-8">
-                              {message.content.split("\n\n").map((paragraph, index) => {
-                                // Skip disclaimer paragraph as it's handled above
-                                if (paragraph.includes("Disclaimer")) return null
-
-                                // Handle section headers
-                                if (paragraph.includes("**") && paragraph.includes(":")) {
-                                  const cleanHeader = paragraph.replace(/\*\*/g, "").trim()
-                                  return (
-                                    <div key={index} className="border-l-4 border-blue-500 pl-6 py-2">
-                                      <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                                        {cleanHeader}
-                                      </h3>
-                                    </div>
-                                  )
-                                }
-
-                                // Handle bullet points
-                                if (paragraph.startsWith("*") || paragraph.startsWith("-")) {
-                                  const points = paragraph.split("\n").filter((line) => line.trim())
-                                  return (
-                                    <div key={index} className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-                                      <ul className="space-y-4">
-                                        {points.map((point, pointIndex) => {
-                                          const cleanPoint = point.replace(/^[*-]\s*/, "").trim()
-                                          return (
-                                            <li key={pointIndex} className="flex items-start gap-3">
-                                              <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                                              <span className="text-gray-700 leading-relaxed text-sm">
-                                                {cleanPoint}
-                                              </span>
-                                            </li>
-                                          )
-                                        })}
-                                      </ul>
-                                    </div>
-                                  )
-                                }
-
-                                // Handle regular paragraphs
-                                if (paragraph.trim()) {
-                                  return (
-                                    <div
-                                      key={index}
-                                      className="bg-white rounded-lg p-6 border border-gray-100 shadow-sm"
-                                    >
-                                      <p className="text-gray-800 leading-relaxed text-sm">
-                                        {paragraph.replace(/\*\*/g, "").trim()}
-                                      </p>
-                                    </div>
-                                  )
-                                }
-
-                                return null
-                              })}
-                            </div>
+                            {hasContent && (
+                              <div className="space-y-6 text-sm text-gray-800 leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                  {markdownContent}
+                                </ReactMarkdown>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
 
-                      {/* Footer */}
-                      <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <div className="flex items-center gap-2">
-                            <Activity className="h-3 w-3" />
-                            <span>Powered by Groq AI • Real-time Analysis</span>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              <span>{message.timestamp.toLocaleString()}</span>
+                        {/* Footer */}
+                        <div className="bg-gray-50 px-6 py-4 border-t border-gray-100">
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <div className="flex items-center gap-2">
+                              <Activity className="h-3 w-3" />
+                              <span>Powered by {message.model||"Groq AI"} - Real-time Analysis</span>
                             </div>
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-                                <ThumbsUp className="h-3 w-3" />
-                              </Button>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-                                <ThumbsDown className="h-3 w-3" />
-                              </Button>
+                            <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                <span>{message.timestamp.toLocaleString()}</span>
+                              </div>
+                              <div className="flex gap-1">
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                                  <ThumbsUp className="h-3 w-3" />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                                  <ThumbsDown className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    // Enhanced User Message Design
+                  )
+                }
+
+                return (
+                  <div key={message.id} className={`${alignmentClass} mb-8`}>
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border-l-4 border-blue-500 p-6 shadow-sm">
                       <div className="flex items-center gap-3 mb-3">
                         <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
@@ -713,9 +880,9 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                         <p className="text-gray-800 leading-relaxed text-sm">{message.content}</p>
                       </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                )
+              })}
 
               {isLoading && (
                 <div className="mr-8 mb-8">
@@ -817,10 +984,6 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
         <CardFooter className="bg-gray-50 border-t">
           <div className="flex items-center justify-between w-full text-xs text-gray-500">
             <div className="flex items-center gap-2">
-              <Brain className="h-3 w-3" />
-              <span>Powered by Groq Llama 3.1 - Professional Financial Analysis</span>
-            </div>
-            <div className="flex items-center gap-2">
               <Activity className="h-3 w-3" />
               <span>Real-time responses</span>
             </div>
@@ -835,3 +998,4 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
     </div>
   )
 }
+

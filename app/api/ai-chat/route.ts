@@ -33,11 +33,21 @@ export async function POST(req: NextRequest) {
     )
 
     let searchContext = ""
+    let structuredResults: Array<{ title: string; url: string; description: string }> = []
     if (braveResponse.ok) {
       const searchData = await braveResponse.json()
       // Extract top 5 search results for context (increased from 3 for better coverage)
       const results = searchData.web?.results?.slice(0, 5) || []
-      searchContext = results.map((r: any) => `- ${r.title}: ${r.description}`).join("\n")
+      structuredResults = results
+        .filter((r: any) => r?.title && r?.url)
+        .map((r: any) => ({
+          title: r.title as string,
+          url: r.url as string,
+          description: (r.description as string) || "",
+        }))
+      searchContext = structuredResults
+        .map((r) => `- ${r.title} (${r.url}): ${r.description}`)
+        .join("\n")
     }
 
     // Step 2: Build system prompt with stock data and search results
@@ -86,7 +96,8 @@ Provide professional, clear, and actionable financial analysis. Keep responses c
       response: aiResponse,
       timestamp: new Date().toISOString(),
       model: "deepseek/deepseek-chat-v3.1",
-      searchEnabled: !!searchContext,
+      searchEnabled: structuredResults.length > 0,
+      searchResults: structuredResults,
     })
   } catch (error: any) {
     console.error("AI Chat Error:", error)
