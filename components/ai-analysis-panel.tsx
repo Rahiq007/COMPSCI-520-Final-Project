@@ -116,6 +116,8 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [isSearchingWeb, setIsSearchingWeb] = useState(false)
+  const [isGeneratingResponse, setIsGeneratingResponse] = useState(false)
 
   // Suggested questions for better user experience
   const suggestedQuestions = [
@@ -193,6 +195,7 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
     if (!messageText.trim() || isLoading) return
 
     setIsLoading(true)
+    setIsSearchingWeb(true)
     setChatError(null)
 
     // Add user message
@@ -222,48 +225,87 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
         throw new Error(errorData.error || `Server error: ${response.status}`)
       }
 
-      const data = await response.json()
-
-      const timestamp = data.timestamp ? new Date(data.timestamp) : new Date()
+      // Handle streaming response
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
       const baseId = Date.now().toString()
-      const searchResults: SearchResult[] = Array.isArray(data.searchResults)
-        ? (data.searchResults as Array<{ title?: string; url?: string; description?: string }>)
-            .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
-            .map((result) => ({
-              title: result.title as string,
-              url: result.url as string,
-              description: typeof result.description === "string" ? result.description : "",
-            }))
-        : []
+      let buffer = ""
+      let searchResultsAdded = false
 
-      setMessages((prev) => {
-        const updatedMessages = [...prev]
+      if (!reader) {
+        throw new Error("Response body is not readable")
+      }
 
-        if (searchResults.length > 0) {
-          updatedMessages.push({
-            id: `${baseId}-search`,
-            role: "search",
-            content: "",
-            timestamp,
-            searchResults,
-          })
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6)
+            try {
+              const data = JSON.parse(jsonStr)
+
+              if (data.type === "search" && data.searchResults) {
+                // Add search results immediately
+                const searchResults: SearchResult[] = Array.isArray(data.searchResults)
+                  ? (data.searchResults as Array<{ title?: string; url?: string; description?: string }>)
+                      .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
+                      .map((result) => ({
+                        title: result.title as string,
+                        url: result.url as string,
+                        description: typeof result.description === "string" ? result.description : "",
+                      }))
+                  : []
+
+                if (searchResults.length > 0) {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `${baseId}-search`,
+                      role: "search",
+                      content: "",
+                      timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+                      searchResults,
+                    },
+                  ])
+                  searchResultsAdded = true
+                  setIsSearchingWeb(false)
+                  setIsGeneratingResponse(true)
+                }
+              } else if (data.type === "response") {
+                // Add AI response after search results
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `${baseId}-assistant`,
+                    role: "assistant",
+                    content: data.response || "Sorry, I couldn't generate a response.",
+                    timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+                    model: data.model,
+                  },
+                ])
+                setIsGeneratingResponse(false)
+              } else if (data.type === "error") {
+                throw new Error(data.error || "Unknown error")
+              }
+            } catch (parseError) {
+              console.error("Error parsing SSE data:", parseError, jsonStr)
+            }
+          }
         }
-
-        updatedMessages.push({
-          id: `${baseId}-assistant`,
-          role: "assistant",
-          content: data.response || "Sorry, I couldn't generate a response.",
-          timestamp,
-          model: data.model,
-        })
-
-        return updatedMessages
-      })
+      }
     } catch (err: any) {
       console.error("Chat error:", err)
       setChatError(err.message || "Failed to get AI response")
     } finally {
       setIsLoading(false)
+      setIsSearchingWeb(false)
+      setIsGeneratingResponse(false)
     }
   }
 
@@ -884,14 +926,55 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                 )
               })}
 
-              {isLoading && (
+              {isSearchingWeb && (
                 <div className="mr-8 mb-8">
-                  <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                  <div className="bg-white rounded-xl shadow-lg border border-blue-200 overflow-hidden">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-50 via-cyan-50 to-blue-50 px-6 py-4 border-b border-blue-100">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-100 rounded-lg">
+                          <Search className="h-5 w-5 text-blue-600 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900">Web Search</span>
+                            <Badge variant="outline" className="text-xs bg-white border-blue-200 text-blue-700">
+                              Searching...
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Finding latest information about {ticker.toUpperCase()}...
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-8">
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                          <span className="text-gray-600">Searching the web for relevant information...</span>
+                        </div>
+                        <div className="space-y-3">
+                          <div className="h-4 bg-blue-100 rounded animate-pulse"></div>
+                          <div className="h-4 bg-blue-100 rounded animate-pulse w-3/4"></div>
+                          <div className="h-4 bg-blue-100 rounded animate-pulse w-1/2"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {isGeneratingResponse && (
+                <div className="mr-8 mb-8">
+                  <div className="bg-white rounded-xl shadow-lg border border-purple-200 overflow-hidden">
                     {/* Header */}
                     <div className="bg-gradient-to-r from-purple-50 via-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-100">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-purple-100 rounded-lg">
-                          <Loader2 className="h-5 w-5 text-purple-600 animate-spin" />
+                          <Brain className="h-5 w-5 text-purple-600 animate-pulse" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -911,13 +994,13 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                     <div className="p-8">
                       <div className="space-y-4">
                         <div className="flex items-center gap-3">
-                          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                          <span className="text-gray-600">Analyzing {ticker.toUpperCase()} market data...</span>
+                          <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
+                          <span className="text-gray-600">Analyzing {ticker.toUpperCase()} with AI...</span>
                         </div>
                         <div className="space-y-3">
-                          <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
-                          <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
-                          <div className="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div>
+                          <div className="h-4 bg-purple-100 rounded animate-pulse"></div>
+                          <div className="h-4 bg-purple-100 rounded animate-pulse w-3/4"></div>
+                          <div className="h-4 bg-purple-100 rounded animate-pulse w-1/2"></div>
                         </div>
                       </div>
                     </div>

@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 
 /**
- * NEW: DeepSeek with Brave Search Implementation
+ * NEW: DeepSeek with Brave Search Implementation (Streaming)
  * Uses OpenRouter API with deepseek/deepseek-chat-v3.1 model
  * Performs web search via Brave Search API before generating response
+ * Returns search results first, then AI response
  */
 export async function POST(req: NextRequest) {
   try {
@@ -18,40 +19,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI service not configured" }, { status: 503 })
     }
 
-    // Step 1: Perform Brave Search for general context (not stock-specific)
-    // Stock data already comes from stockData parameter, search provides broader context
-    const searchQuery = message
-    const braveResponse = await fetch(
-      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}`,
-      {
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip",
-          "X-Subscription-Token": process.env.BRAVE_SEARCH,
-        },
-      }
-    )
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Step 1: Perform Brave Search and send results immediately
+          const searchQuery = message
+          const braveResponse = await fetch(
+            `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}`,
+            {
+              headers: {
+                Accept: "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": process.env.BRAVE_SEARCH!,
+              },
+            }
+          )
 
-    let searchContext = ""
-    let structuredResults: Array<{ title: string; url: string; description: string }> = []
-    if (braveResponse.ok) {
-      const searchData = await braveResponse.json()
-      // Extract top 5 search results for context (increased from 3 for better coverage)
-      const results = searchData.web?.results?.slice(0, 5) || []
-      structuredResults = results
-        .filter((r: any) => r?.title && r?.url)
-        .map((r: any) => ({
-          title: r.title as string,
-          url: r.url as string,
-          description: (r.description as string) || "",
-        }))
-      searchContext = structuredResults
-        .map((r) => `- ${r.title} (${r.url}): ${r.description}`)
-        .join("\n")
-    }
+          let searchContext = ""
+          let structuredResults: Array<{ title: string; url: string; description: string }> = []
+          if (braveResponse.ok) {
+            const searchData = await braveResponse.json()
+            const results = searchData.web?.results?.slice(0, 5) || []
+            structuredResults = results
+              .filter((r: any) => r?.title && r?.url)
+              .map((r: any) => ({
+                title: r.title as string,
+                url: r.url as string,
+                description: (r.description as string) || "",
+              }))
+            searchContext = structuredResults
+              .map((r) => `- ${r.title} (${r.url}): ${r.description}`)
+              .join("\n")
 
-    // Step 2: Build system prompt with stock data and search results
-    const systemPrompt = `You are a professional financial analyst providing insights about ${ticker || "the stock"}.
+            // Send search results immediately
+            const searchMessage = JSON.stringify({
+              type: "search",
+              searchResults: structuredResults,
+              timestamp: new Date().toISOString(),
+            })
+            controller.enqueue(encoder.encode(`data: ${searchMessage}\n\n`))
+          }
+
+          // Step 2: Build system prompt with stock data and search results
+          const systemPrompt = `You are a professional financial analyst providing insights about ${ticker || "the stock"}.
 
 ${stockData ? `Current Market Data:
 - Price: $${stockData.currentPrice || "N/A"}
@@ -64,40 +75,67 @@ ${searchContext ? `Recent Web Search Results:\n${searchContext}` : ""}
 
 Provide professional, clear, and actionable financial analysis. Keep responses concise but comprehensive. Always mention this is for educational purposes only and not personalized financial advice.`
 
-    // Step 3: Call OpenRouter API with DeepSeek model
-    console.log(`debug search result from brave: ${searchContext}.`)
-    const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
-        "Content-Type": "application/json",
+          // Step 3: Call OpenRouter API with DeepSeek model
+          console.log(`debug search result from brave: ${searchContext}.`)
+          const openRouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.OPENROUTER_KEY!}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "deepseek/deepseek-chat-v3.1",
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: message },
+              ],
+              max_tokens: 1000,
+              temperature: 0.3,
+            }),
+          })
+
+          if (!openRouterResponse.ok) {
+            const errorText = await openRouterResponse.text()
+            console.error("OpenRouter API Error:", openRouterResponse.status, errorText)
+            const errorMessage = JSON.stringify({
+              type: "error",
+              error: "AI service temporarily unavailable",
+            })
+            controller.enqueue(encoder.encode(`data: ${errorMessage}\n\n`))
+            controller.close()
+            return
+          }
+
+          const data = await openRouterResponse.json()
+          const aiResponse = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response."
+
+          // Send AI response
+          const responseMessage = JSON.stringify({
+            type: "response",
+            response: aiResponse,
+            timestamp: new Date().toISOString(),
+            model: "deepseek/deepseek-chat-v3.1",
+          })
+          controller.enqueue(encoder.encode(`data: ${responseMessage}\n\n`))
+          controller.close()
+        } catch (error: any) {
+          console.error("Stream Error:", error)
+          const errorMessage = JSON.stringify({
+            type: "error",
+            error: error.message || "Failed to process request",
+          })
+          controller.enqueue(encoder.encode(`data: ${errorMessage}\n\n`))
+          controller.close()
+        }
       },
-      body: JSON.stringify({
-        model: "deepseek/deepseek-chat-v3.1",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message },
-        ],
-        max_tokens: 1000,
-        temperature: 0.3,
-      }),
     })
 
-    if (!openRouterResponse.ok) {
-      const errorText = await openRouterResponse.text()
-      console.error("OpenRouter API Error:", openRouterResponse.status, errorText)
-      return NextResponse.json({ error: "AI service temporarily unavailable" }, { status: 503 })
-    }
-
-    const data = await openRouterResponse.json()
-    const aiResponse = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response."
-
-    return NextResponse.json({
-      response: aiResponse,
-      timestamp: new Date().toISOString(),
-      model: "deepseek/deepseek-chat-v3.1",
-      searchEnabled: structuredResults.length > 0,
-      searchResults: structuredResults,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
     })
   } catch (error: any) {
     console.error("AI Chat Error:", error)
