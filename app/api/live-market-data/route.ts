@@ -6,92 +6,92 @@ const DEFAULT_STOCKS = [
   {
     ticker: "AAPL",
     companyName: "Apple Inc.",
-    price: 189.25,
-    change: 2.34,
-    changePercent: 1.25,
-    volume: 58500000,
-    marketCap: 2950000000000,
+    price: 271.49,
+    change: 5.24,
+    changePercent: 1.97,
+    volume: 59030832,
+    marketCap: 4029000000000,
   },
   {
     ticker: "MSFT",
-    companyName: "Microsoft Corp.",
-    price: 378.85,
-    change: -1.45,
-    changePercent: -0.38,
-    volume: 24800000,
-    marketCap: 2810000000000,
+    companyName: "Microsoft Corporation",
+    price: 472.12,
+    change: -6.31,
+    changePercent: -1.32,
+    volume: 31769248,
+    marketCap: 3509000000000,
   },
   {
     ticker: "NVDA",
-    companyName: "NVIDIA Corp.",
-    price: 346.46,
-    change: 8.92,
-    changePercent: 2.64,
-    volume: 45200000,
-    marketCap: 850000000000,
+    companyName: "NVIDIA Corporation",
+    price: 178.88,
+    change: -1.76,
+    changePercent: -0.97,
+    volume: 346926153,
+    marketCap: 4362000000000,
   },
   {
     ticker: "GOOGL",
     companyName: "Alphabet Inc.",
-    price: 166.75,
-    change: 0.85,
-    changePercent: 0.51,
-    volume: 28400000,
-    marketCap: 2100000000000,
+    price: 299.66,
+    change: 10.21,
+    changePercent: 3.53,
+    volume: 74137697,
+    marketCap: 3630000000000,
   },
   {
     ticker: "TSLA",
-    companyName: "Tesla Inc.",
-    price: 248.5,
-    change: -3.21,
-    changePercent: -1.27,
-    volume: 78900000,
-    marketCap: 789000000000,
+    companyName: "Tesla, Inc",
+    price: 391.09,
+    change: -3.95,
+    changePercent: -1.00,
+    volume: 100460633,
+    marketCap: 1301000000000,
   },
   {
     ticker: "AMZN",
-    companyName: "Amazon.com Inc.",
-    price: 155.89,
-    change: 1.67,
-    changePercent: 1.08,
-    volume: 35600000,
-    marketCap: 1600000000000,
+    companyName: "Amazon.com, Inc.",
+    price: 220.69,
+    change: 3.55,
+    changePercent: 1.63,
+    volume: 68490464,
+    marketCap: 2359000000000,
   },
   {
     ticker: "META",
-    companyName: "Meta Platforms Inc.",
-    price: 485.32,
-    change: 5.21,
-    changePercent: 1.09,
-    volume: 18500000,
-    marketCap: 1230000000000,
+    companyName: "Meta Platforms, Inc.",
+    price: 594.25,
+    change: 5.03,
+    changePercent: 0.85,
+    volume: 21052624,
+    marketCap: 1498000000000,
   },
   {
     ticker: "JPM",
     companyName: "JPMorgan Chase & Co.",
-    price: 195.45,
-    change: 2.15,
-    changePercent: 1.11,
-    volume: 12500000,
-    marketCap: 560000000000,
+    price: 298.02,
+    change: -0.36,
+    changePercent: -0.12,
+    volume: 11742526,
+    marketCap: 819482000000,
   },
   {
     ticker: "V",
     companyName: "Visa Inc.",
-    price: 275.83,
-    change: 1.45,
-    changePercent: 0.53,
-    volume: 8500000,
-    marketCap: 590000000000,
+    price: 327.98,
+    change: 4.21,
+    changePercent: 1.30,
+    volume: 8832314,
+    marketCap: 636590000000,
   },
   {
     ticker: "JNJ",
     companyName: "Johnson & Johnson",
-    price: 162.25,
-    change: -0.85,
-    changePercent: -0.52,
-    volume: 9500000,
-    marketCap: 420000000000,
+    price: 203.09,
+    change: 0.83,
+    changePercent: 0.41,
+    volume: 13172196,
+    marketCap: 491255000000,
   },
 ]
 
@@ -155,11 +155,12 @@ export async function GET() {
 
           const stockData = {
             ticker,
-            companyName: quote?.ticker?.includes(".") ? ticker : `${ticker} Corp.`,
-            price: quote.currentPrice,
-            change: quote.change,
-            changePercent: quote.changePercent,
-            volume: quote.volume || 0,
+            companyName: DEFAULT_STOCKS.find(s => s.ticker === ticker)?.companyName || quote?.ticker || `${ticker} Corp.`,
+            price: info.price || quote.currentPrice,
+            change: info.change || quote.change,
+            changePercent: info.changePercent || quote.changePercent,
+            // Use volume from quote, fallback to volume from company info, then avgVolume
+            volume: (quote.volume && quote.volume > 0) ? quote.volume : (info.volume || info.avgVolume || 0),
             marketCap: info.marketCap || 0,
           }
 
@@ -298,9 +299,21 @@ function validateStockData(stock: any) {
   } else if (marketCap < 1000000000) {
     // Market cap is less than 1B
     if (isLargeCap) {
-      // For known large caps, market cap < 1B is definitely wrong - use default
-      console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
-      marketCap = defaultStock?.marketCap || 0
+      // If market cap is suspiciously small (likely in millions), try scaling it
+      // Yahoo Finance sometimes returns market cap in millions
+      if (marketCap > 100000 && marketCap < 10000000) { // 100k to 10m range
+         const scaledMarketCap = marketCap * 1000000;
+         if (scaledMarketCap > 100000000000) { // If scaled is > 100B
+            console.log(`[${stock.ticker}] ⚠️ Market cap seems scaled in millions (${marketCap}), scaling up to ${scaledMarketCap}`);
+            marketCap = scaledMarketCap;
+         } else {
+            console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
+            marketCap = defaultStock?.marketCap || 0
+         }
+      } else {
+        console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
+        marketCap = defaultStock?.marketCap || 0
+      }
     } else if (marketCap < 1000000) {
       // For other stocks, less than 1M is definitely wrong, use default
       console.warn(`[${stock.ticker}] Market cap too small (${marketCap}), using default`)

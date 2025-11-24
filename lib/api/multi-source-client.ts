@@ -196,21 +196,33 @@ export class MultiSourceStockClient {
     const meta = result.meta
     const quote = result.indicators.quote[0]
 
-    // Prefer regularMarketVolume (current day's volume) over historical volume array
-    // Try multiple volume sources for best accuracy
+    // Get volume - try multiple sources and find last non-zero value
     let volume = 0
-    if (meta.regularMarketVolume) {
+    
+    // First try regularMarketVolume (current day's volume)
+    if (meta.regularMarketVolume && meta.regularMarketVolume > 0) {
       volume = meta.regularMarketVolume
     } else if (quote.volume && quote.volume.length > 0) {
-      // Get the last (most recent) volume from the array
-      volume = quote.volume[quote.volume.length - 1] || 0
-    } else if (meta.volume) {
+      // Find last non-zero volume from the array (most recent valid value)
+      for (let i = quote.volume.length - 1; i >= 0; i--) {
+        if (quote.volume[i] && quote.volume[i] > 0) {
+          volume = quote.volume[i]
+          break
+        }
+      }
+    } else if (meta.volume && meta.volume > 0) {
       volume = meta.volume
     }
 
     // Log volume extraction for debugging
     if (volume > 0) {
       console.log(`[normalizeYahooQuote] Volume extracted: ${volume.toLocaleString()} for ${meta.symbol}`)
+    } else {
+      console.warn(`[normalizeYahooQuote] No volume found for ${meta.symbol}`, {
+        hasRegularMarketVolume: !!meta.regularMarketVolume,
+        hasVolumeArray: !!quote.volume,
+        volumeArrayLength: quote.volume?.length || 0
+      })
     }
 
     return {
@@ -310,6 +322,10 @@ export class MultiSourceStockClient {
       dividend: financials.metric?.dividendYieldIndicatedAnnual || 0,
       beta: financials.metric?.beta || 1,
       avgVolume: financials.metric?.vol1DayAvg || 0,
+      volume: 0,
+      price: 0,
+      change: 0,
+      changePercent: 0,
       fiftyTwoWeekHigh: financials.metric?.["52WeekHigh"] || 0,
       fiftyTwoWeekLow: financials.metric?.["52WeekLow"] || 0,
     }
@@ -326,6 +342,10 @@ export class MultiSourceStockClient {
         dividend: 0,
         beta: 1,
         avgVolume: 0,
+        volume: 0,
+        price: 0,
+        change: 0,
+        changePercent: 0,
         fiftyTwoWeekHigh: 0,
         fiftyTwoWeekLow: 0,
       }
@@ -334,10 +354,16 @@ export class MultiSourceStockClient {
     const financialData = quoteSummary.financialData
     const defaultKeyStatistics = quoteSummary.defaultKeyStatistics
     const summaryProfile = quoteSummary.summaryProfile
+    const summaryDetail = quoteSummary.summaryDetail
+    const price = quoteSummary.price
 
-    // Extract market cap - try multiple possible paths in Yahoo Finance API
+    // Extract market cap - try price module first, then summaryDetail, etc.
     let marketCap = 0
-    if (defaultKeyStatistics?.marketCap?.raw) {
+    if (price?.marketCap?.raw) {
+      marketCap = price.marketCap.raw
+    } else if (summaryDetail?.marketCap?.raw) {
+      marketCap = summaryDetail.marketCap.raw
+    } else if (defaultKeyStatistics?.marketCap?.raw) {
       marketCap = defaultKeyStatistics.marketCap.raw
     } else if (defaultKeyStatistics?.marketCap) {
       marketCap = typeof defaultKeyStatistics.marketCap === "number" 
@@ -349,27 +375,39 @@ export class MultiSourceStockClient {
         : 0
     }
 
+    // Extract volume - try price module first, then summaryDetail
+    const volume = price?.regularMarketVolume?.raw || summaryDetail?.volume?.raw || summaryDetail?.volume || 0
+
+    // Extract price data
+    const currentPrice = price?.regularMarketPrice?.raw || 0
+    const change = price?.regularMarketChange?.raw || 0
+    const changePercent = price?.regularMarketChangePercent?.raw ? price.regularMarketChangePercent.raw * 100 : 0
+
     // Log if market cap is extracted successfully
     if (marketCap > 0) {
       console.log(`[normalizeYahooCompanyInfo] Market cap extracted: ${marketCap} (${marketCap >= 1e12 ? `${(marketCap/1e12).toFixed(3)}T` : marketCap >= 1e9 ? `${(marketCap/1e9).toFixed(3)}B` : `${marketCap}`})`)
     } else {
       console.warn(`[normalizeYahooCompanyInfo] Market cap not found in API response`, {
-        hasDefaultKeyStats: !!defaultKeyStatistics,
-        hasSummaryProfile: !!summaryProfile,
-        marketCapRaw: defaultKeyStatistics?.marketCap?.raw,
-        marketCapDirect: defaultKeyStatistics?.marketCap
+        hasPrice: !!price,
+        hasSummaryDetail: !!summaryDetail,
+        priceMarketCap: price?.marketCap?.raw,
+        summaryDetailMarketCap: summaryDetail?.marketCap?.raw
       })
     }
 
     return {
-      pe: defaultKeyStatistics?.trailingPE?.raw || 0,
+      pe: defaultKeyStatistics?.trailingPE?.raw || summaryDetail?.trailingPE?.raw || 0,
       eps: defaultKeyStatistics?.trailingEps?.raw || 0,
       marketCap: marketCap,
-      dividend: defaultKeyStatistics?.dividendYield?.raw ? defaultKeyStatistics.dividendYield.raw * 100 : 0,
-      beta: defaultKeyStatistics?.beta?.raw || 1,
-      avgVolume: defaultKeyStatistics?.averageVolume?.raw || 0,
-      fiftyTwoWeekHigh: defaultKeyStatistics?.fiftyTwoWeekHigh?.raw || 0,
-      fiftyTwoWeekLow: defaultKeyStatistics?.fiftyTwoWeekLow?.raw || 0,
+      dividend: defaultKeyStatistics?.dividendYield?.raw ? defaultKeyStatistics.dividendYield.raw * 100 : (summaryDetail?.dividendYield?.raw ? summaryDetail.dividendYield.raw * 100 : 0),
+      beta: defaultKeyStatistics?.beta?.raw || summaryDetail?.beta?.raw || 1,
+      avgVolume: defaultKeyStatistics?.averageVolume?.raw || summaryDetail?.averageVolume?.raw || 0,
+      volume: volume,
+      price: currentPrice,
+      change: change,
+      changePercent: changePercent,
+      fiftyTwoWeekHigh: defaultKeyStatistics?.fiftyTwoWeekHigh?.raw || summaryDetail?.fiftyTwoWeekHigh?.raw || 0,
+      fiftyTwoWeekLow: defaultKeyStatistics?.fiftyTwoWeekLow?.raw || summaryDetail?.fiftyTwoWeekLow?.raw || 0,
     }
   }
 
