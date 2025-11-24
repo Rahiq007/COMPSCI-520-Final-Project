@@ -57,6 +57,42 @@ const DEFAULT_STOCKS = [
     volume: 35600000,
     marketCap: 1600000000000,
   },
+  {
+    ticker: "META",
+    companyName: "Meta Platforms Inc.",
+    price: 485.32,
+    change: 5.21,
+    changePercent: 1.09,
+    volume: 18500000,
+    marketCap: 1230000000000,
+  },
+  {
+    ticker: "JPM",
+    companyName: "JPMorgan Chase & Co.",
+    price: 195.45,
+    change: 2.15,
+    changePercent: 1.11,
+    volume: 12500000,
+    marketCap: 560000000000,
+  },
+  {
+    ticker: "V",
+    companyName: "Visa Inc.",
+    price: 275.83,
+    change: 1.45,
+    changePercent: 0.53,
+    volume: 8500000,
+    marketCap: 590000000000,
+  },
+  {
+    ticker: "JNJ",
+    companyName: "Johnson & Johnson",
+    price: 162.25,
+    change: -0.85,
+    changePercent: -0.52,
+    volume: 9500000,
+    marketCap: 420000000000,
+  },
 ]
 
 // Default ETF data in case API calls fail
@@ -93,7 +129,7 @@ const DEFAULT_ETFS = [
 export async function GET() {
   try {
     const client = new MultiSourceStockClient()
-    const stockTickers = ["AAPL", "MSFT", "NVDA", "GOOGL", "TSLA", "AMZN"]
+    const stockTickers = ["AAPL", "MSFT", "NVDA", "GOOGL", "TSLA", "AMZN", "META", "JPM", "V", "JNJ"]
     const etfTickers = ["SPY", "QQQ", "VTI"]
 
     // Try to fetch real data
