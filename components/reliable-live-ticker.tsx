@@ -6,6 +6,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrendingUp, TrendingDown, RefreshCw, Wifi } from "lucide-react"
 import { fetchLiveMarketData, fetchLiveCryptoData, type CryptoData } from "@/lib/api"
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  type CarouselApi,
+} from "@/components/ui/carousel"
 
 interface StockData {
   ticker: string
@@ -46,6 +52,8 @@ export default function ReliableLiveTicker({ currentAnalyzedTicker, currentPrice
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isLive, setIsLive] = useState(true)
+  const [api, setApi] = useState<CarouselApi>()
+  const [current, setCurrent] = useState(0)
 
   const loadMarketData = async () => {
     setLoading(true)
@@ -95,6 +103,37 @@ export default function ReliableLiveTicker({ currentAnalyzedTicker, currentPrice
       return () => clearInterval(intervalId)
     }
   }, [mode])
+
+  // Auto-rotation for carousel
+  useEffect(() => {
+    if (!api) {
+      return
+    }
+
+    setCurrent(api.selectedScrollSnap())
+
+    api.on("select", () => {
+      setCurrent(api.selectedScrollSnap())
+    })
+  }, [api])
+
+  // Auto-scroll carousel every 2 seconds
+  useEffect(() => {
+    if (!api || !marketData?.stocks || mode !== "stock") {
+      return
+    }
+
+    const intervalId = setInterval(() => {
+      if (api.canScrollNext()) {
+        api.scrollNext()
+      } else {
+        // Loop back to start
+        api.scrollTo(0)
+      }
+    }, 2000) // 2 seconds
+
+    return () => clearInterval(intervalId)
+  }, [api, marketData, mode])
 
   // Format currency with appropriate decimal places
   const formatCurrency = (value: number, isCrypto = false) => {
@@ -202,15 +241,24 @@ export default function ReliableLiveTicker({ currentAnalyzedTicker, currentPrice
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <Badge variant="outline">{mode === "stock" ? "Stocks" : "Cryptocurrencies"}</Badge>
-              <span className="text-sm text-gray-500">{mode === "stock" ? "Top 6 Performers" : "Top 5 Trending"}</span>
+              <span className="text-sm text-gray-500">{mode === "stock" ? "Top 10 Performers" : "Top 5 Trending"}</span>
             </div>
-            <div
-              className={`grid gap-4 ${mode === "stock" ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6" : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5"}`}
+            <Carousel
+              setApi={setApi}
+              opts={{
+                align: "start",
+                loop: true,
+              }}
+              className="w-full"
             >
-              {[...Array(mode === "stock" ? 6 : 5)].map((_, i) => (
-                <div key={i} className="bg-gray-100 animate-pulse h-32 rounded-md"></div>
-              ))}
-            </div>
+              <CarouselContent className="-ml-2 md:-ml-4">
+                {[...Array(mode === "stock" ? 10 : 5)].map((_, i) => (
+                  <CarouselItem key={i} className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/4 lg:basis-1/5">
+                    <div className="bg-gray-100 animate-pulse h-32 rounded-md"></div>
+                  </CarouselItem>
+                ))}
+              </CarouselContent>
+            </Carousel>
           </div>
         ) : mode === "crypto" ? (
           <div className="space-y-4">
@@ -280,50 +328,60 @@ export default function ReliableLiveTicker({ currentAnalyzedTicker, currentPrice
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Badge variant="outline">Stocks</Badge>
-                <span className="text-sm text-gray-500">Top 6 Performers</span>
+                <span className="text-sm text-gray-500">Top 10 Performers</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {marketData?.stocks.map((stock) => (
-                  <div
-                    key={stock.ticker}
-                    className={`bg-white rounded-lg p-3 border transition-all duration-200 ${
-                      isCurrentTicker(stock.ticker)
-                        ? "border-blue-500 ring-2 ring-blue-200"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-bold text-lg">{stock.ticker}</h3>
-                        <p className="text-xs text-gray-500 truncate">{stock.companyName}</p>
+              <Carousel
+                setApi={setApi}
+                opts={{
+                  align: "start",
+                  loop: true,
+                }}
+                className="w-full"
+              >
+                <CarouselContent className="-ml-2 md:-ml-4">
+                  {marketData?.stocks.map((stock) => (
+                    <CarouselItem key={stock.ticker} className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/4 lg:basis-1/5">
+                      <div
+                        className={`bg-white rounded-lg p-3 border transition-all duration-200 h-full ${
+                          isCurrentTicker(stock.ticker)
+                            ? "border-blue-500 ring-2 ring-blue-200"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h3 className="font-bold text-lg">{stock.ticker}</h3>
+                            <p className="text-xs text-gray-500 truncate">{stock.companyName}</p>
+                          </div>
+                          {stock.change >= 0 ? (
+                            <TrendingUp className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <TrendingDown className="h-4 w-4 text-red-500" />
+                          )}
+                        </div>
+
+                        <div className="mt-2">
+                          <p className="text-xl font-bold">
+                            {isCurrentTicker(stock.ticker) && currentPrice
+                              ? formatCurrency(currentPrice)
+                              : formatCurrency(stock.price)}
+                          </p>
+                          <p className={`text-sm ${stock.change >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {formatChange(stock.change)} ({formatPercent(stock.changePercent)})
+                          </p>
+                        </div>
+
+                        <div className="mt-1 text-xs text-gray-500">
+                          <p>
+                            Vol: {formatVolume(stock.volume)} | Cap: {formatMarketCap(stock.marketCap)}
+                          </p>
+                        </div>
                       </div>
-                      {stock.change >= 0 ? (
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <TrendingDown className="h-4 w-4 text-red-500" />
-                      )}
-                    </div>
-
-                    <div className="mt-2">
-                      <p className="text-xl font-bold">
-                        {isCurrentTicker(stock.ticker) && currentPrice
-                          ? formatCurrency(currentPrice)
-                          : formatCurrency(stock.price)}
-                      </p>
-                      <p className={`text-sm ${stock.change >= 0 ? "text-green-600" : "text-red-600"}`}>
-                        {formatChange(stock.change)} ({formatPercent(stock.changePercent)})
-                      </p>
-                    </div>
-
-                    <div className="mt-1 text-xs text-gray-500">
-                      <p>
-                        Vol: {formatVolume(stock.volume)} | Cap: {formatMarketCap(stock.marketCap)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+              </Carousel>
             </div>
 
             <div className="mt-6 space-y-4">
