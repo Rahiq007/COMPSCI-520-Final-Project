@@ -196,12 +196,29 @@ export class MultiSourceStockClient {
     const meta = result.meta
     const quote = result.indicators.quote[0]
 
+    // Prefer regularMarketVolume (current day's volume) over historical volume array
+    // Try multiple volume sources for best accuracy
+    let volume = 0
+    if (meta.regularMarketVolume) {
+      volume = meta.regularMarketVolume
+    } else if (quote.volume && quote.volume.length > 0) {
+      // Get the last (most recent) volume from the array
+      volume = quote.volume[quote.volume.length - 1] || 0
+    } else if (meta.volume) {
+      volume = meta.volume
+    }
+
+    // Log volume extraction for debugging
+    if (volume > 0) {
+      console.log(`[normalizeYahooQuote] Volume extracted: ${volume.toLocaleString()} for ${meta.symbol}`)
+    }
+
     return {
       ticker: meta.symbol,
       currentPrice: meta.regularMarketPrice,
       change: meta.regularMarketPrice - meta.previousClose,
       changePercent: ((meta.regularMarketPrice - meta.previousClose) / meta.previousClose) * 100,
-      volume: quote.volume[quote.volume.length - 1] || 0,
+      volume: volume,
       marketCap: 0, // Need separate call
       pe: 0, // Need separate call
       eps: 0, // Need separate call
@@ -299,15 +316,56 @@ export class MultiSourceStockClient {
   }
 
   private normalizeYahooCompanyInfo(data: any) {
-    const quoteSummary = data.quoteSummary.result[0]
+    const quoteSummary = data.quoteSummary?.result?.[0]
+    if (!quoteSummary) {
+      console.warn("Yahoo Finance company info: Invalid response structure")
+      return {
+        pe: 0,
+        eps: 0,
+        marketCap: 0,
+        dividend: 0,
+        beta: 1,
+        avgVolume: 0,
+        fiftyTwoWeekHigh: 0,
+        fiftyTwoWeekLow: 0,
+      }
+    }
+
     const financialData = quoteSummary.financialData
     const defaultKeyStatistics = quoteSummary.defaultKeyStatistics
+    const summaryProfile = quoteSummary.summaryProfile
+
+    // Extract market cap - try multiple possible paths in Yahoo Finance API
+    let marketCap = 0
+    if (defaultKeyStatistics?.marketCap?.raw) {
+      marketCap = defaultKeyStatistics.marketCap.raw
+    } else if (defaultKeyStatistics?.marketCap) {
+      marketCap = typeof defaultKeyStatistics.marketCap === "number" 
+        ? defaultKeyStatistics.marketCap 
+        : 0
+    } else if (summaryProfile?.marketCap) {
+      marketCap = typeof summaryProfile.marketCap === "number"
+        ? summaryProfile.marketCap
+        : 0
+    }
+
+    // Log if market cap is extracted successfully
+    if (marketCap > 0) {
+      console.log(`[normalizeYahooCompanyInfo] Market cap extracted: ${marketCap} (${marketCap >= 1e12 ? `${(marketCap/1e12).toFixed(3)}T` : marketCap >= 1e9 ? `${(marketCap/1e9).toFixed(3)}B` : `${marketCap}`})`)
+    } else {
+      console.warn(`[normalizeYahooCompanyInfo] Market cap not found in API response`, {
+        hasDefaultKeyStats: !!defaultKeyStatistics,
+        hasSummaryProfile: !!summaryProfile,
+        marketCapRaw: defaultKeyStatistics?.marketCap?.raw,
+        marketCapDirect: defaultKeyStatistics?.marketCap
+      })
+    }
 
     return {
       pe: defaultKeyStatistics?.trailingPE?.raw || 0,
       eps: defaultKeyStatistics?.trailingEps?.raw || 0,
-      marketCap: defaultKeyStatistics?.marketCap?.raw || 0,
-      dividend: defaultKeyStatistics?.dividendYield?.raw * 100 || 0,
+      marketCap: marketCap,
+      dividend: defaultKeyStatistics?.dividendYield?.raw ? defaultKeyStatistics.dividendYield.raw * 100 : 0,
       beta: defaultKeyStatistics?.beta?.raw || 1,
       avgVolume: defaultKeyStatistics?.averageVolume?.raw || 0,
       fiftyTwoWeekHigh: defaultKeyStatistics?.fiftyTwoWeekHigh?.raw || 0,

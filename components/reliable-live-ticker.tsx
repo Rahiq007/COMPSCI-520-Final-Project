@@ -159,12 +159,16 @@ export default function ReliableLiveTicker({ currentAnalyzedTicker, currentPrice
     return `${sign}${value.toFixed(2)}%`
   }
 
-  // Format volume in billions or millions
+  // Format volume in billions or millions with better precision
   const formatVolume = (value: number) => {
     if (value >= 1e9) {
-      return `${(value / 1e9).toFixed(1)}B`
+      return `${(value / 1e9).toFixed(2)}B`
     } else if (value >= 1e6) {
-      return `${(value / 1e6).toFixed(1)}M`
+      // Show 2 decimal places for better accuracy (e.g., 59.03M instead of 59.0M)
+      return `${(value / 1e6).toFixed(2)}M`
+    } else if (value >= 1000) {
+      // Show with commas for thousands (e.g., 59,030)
+      return value.toLocaleString()
     } else {
       return value.toLocaleString()
     }

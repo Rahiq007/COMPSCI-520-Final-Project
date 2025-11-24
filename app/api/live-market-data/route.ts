@@ -138,7 +138,22 @@ export async function GET() {
         try {
           const [quote, info] = await Promise.all([client.getQuote(ticker), client.getCompanyInfo(ticker)])
 
-          return {
+          // Log API values for debugging
+          console.log(`[${ticker}] API Data Received:`, {
+            volume: quote?.volume,
+            volumeFormatted: quote?.volume ? `${(quote.volume / 1e6).toFixed(2)}M` : "N/A",
+            marketCap: info?.marketCap,
+            marketCapFormatted: info?.marketCap 
+              ? (info.marketCap >= 1e12 
+                  ? `${(info.marketCap / 1e12).toFixed(3)}T` 
+                  : info.marketCap >= 1e9 
+                    ? `${(info.marketCap / 1e9).toFixed(3)}B`
+                    : `${info.marketCap}`)
+              : "N/A",
+            source: "Yahoo Finance API"
+          })
+
+          const stockData = {
             ticker,
             companyName: quote?.ticker?.includes(".") ? ticker : `${ticker} Corp.`,
             price: quote.currentPrice,
@@ -147,6 +162,18 @@ export async function GET() {
             volume: quote.volume || 0,
             marketCap: info.marketCap || 0,
           }
+
+          console.log(`[${ticker}] Stock data before validation:`, {
+            volume: stockData.volume,
+            marketCap: stockData.marketCap,
+            marketCapFormatted: stockData.marketCap >= 1e12 
+              ? `${(stockData.marketCap / 1e12).toFixed(3)}T` 
+              : stockData.marketCap >= 1e9 
+                ? `${(stockData.marketCap / 1e9).toFixed(3)}B`
+                : `${stockData.marketCap}`
+          })
+
+          return stockData
         } catch (error) {
           console.warn(`Failed to fetch data for ${ticker}:`, error)
           // Return default data for this ticker
@@ -245,16 +272,51 @@ function validateStockData(stock: any) {
       ? stock.changePercent
       : (change / (price - change)) * 100
 
-  // Ensure volume is positive
-  const volume = typeof stock.volume === "number" && stock.volume > 0 ? stock.volume : defaultStock?.volume || 1000000
+  // Preserve volume from API if valid, otherwise use default
+  // Volume should be at least thousands (>= 1000) for realistic stock data
+  const volume =
+    typeof stock.volume === "number" && stock.volume >= 1000
+      ? stock.volume
+      : defaultStock?.volume || 1000000
 
-  // Ensure market cap is realistic
-  const marketCap =
-    typeof stock.marketCap === "number" && stock.marketCap > 0
-      ? stock.marketCap
-      : defaultStock?.marketCap || price * volume
+  // Ensure market cap is realistic and preserve API values
+  // Market cap for large caps should be in billions (>= 1B) or trillions
+  // Only use default if API value is missing or clearly invalid (too small)
+  
+  // List of known large cap stocks that should have market cap in billions/trillions
+  const largeCapStocks = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "JPM", "V", "JNJ"]
+  const isLargeCap = largeCapStocks.includes(stock.ticker)
+  
+  let marketCap = stock.marketCap
 
-  return {
+  if (typeof marketCap !== "number" || marketCap <= 0) {
+    // API didn't provide valid market cap, use default
+    marketCap = defaultStock?.marketCap || 0
+    if (marketCap > 0) {
+      console.log(`[${stock.ticker}] Using default market cap: ${marketCap}`)
+    }
+  } else if (marketCap < 1000000000) {
+    // Market cap is less than 1B
+    if (isLargeCap) {
+      // For known large caps, market cap < 1B is definitely wrong - use default
+      console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
+      marketCap = defaultStock?.marketCap || 0
+    } else if (marketCap < 1000000) {
+      // For other stocks, less than 1M is definitely wrong, use default
+      console.warn(`[${stock.ticker}] Market cap too small (${marketCap}), using default`)
+      marketCap = defaultStock?.marketCap || marketCap
+    }
+    // Otherwise, preserve the value (could be a valid small/mid cap)
+  }
+
+  // Log if we're preserving API market cap
+  if (typeof stock.marketCap === "number" && stock.marketCap > 0 && marketCap >= 1000000000) {
+    console.log(`[${stock.ticker}] ✅ Using API market cap: ${marketCap} (${(marketCap / 1e12).toFixed(3)}T)`)
+  } else if (marketCap < 1000000000 && marketCap > 0) {
+    console.warn(`[${stock.ticker}] ⚠️ Market cap suspiciously low: ${marketCap} (${(marketCap / 1e6).toFixed(2)}M)`)
+  }
+
+  const validatedData = {
     ...stock,
     price,
     change,
@@ -262,6 +324,19 @@ function validateStockData(stock: any) {
     volume,
     marketCap,
   }
+
+  console.log(`[${stock.ticker}] Final validated data:`, {
+    volume: validatedData.volume,
+    volumeFormatted: `${(validatedData.volume / 1e6).toFixed(2)}M`,
+    marketCap: validatedData.marketCap,
+    marketCapFormatted: validatedData.marketCap >= 1e12 
+      ? `${(validatedData.marketCap / 1e12).toFixed(3)}T` 
+      : validatedData.marketCap >= 1e9 
+        ? `${(validatedData.marketCap / 1e9).toFixed(3)}B`
+        : `${(validatedData.marketCap / 1e6).toFixed(2)}M`
+  })
+
+  return validatedData
 }
 
 // Validate ETF data to ensure it's realistic
