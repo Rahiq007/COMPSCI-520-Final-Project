@@ -6,92 +6,92 @@ const DEFAULT_STOCKS = [
   {
     ticker: "AAPL",
     companyName: "Apple Inc.",
-    price: 189.25,
-    change: 2.34,
-    changePercent: 1.25,
-    volume: 58500000,
-    marketCap: 2950000000000,
+    price: 271.49,
+    change: 5.24,
+    changePercent: 1.97,
+    volume: 59030832,
+    marketCap: 4029000000000,
   },
   {
     ticker: "MSFT",
-    companyName: "Microsoft Corp.",
-    price: 378.85,
-    change: -1.45,
-    changePercent: -0.38,
-    volume: 24800000,
-    marketCap: 2810000000000,
+    companyName: "Microsoft Corporation",
+    price: 472.12,
+    change: -6.31,
+    changePercent: -1.32,
+    volume: 31769248,
+    marketCap: 3509000000000,
   },
   {
     ticker: "NVDA",
-    companyName: "NVIDIA Corp.",
-    price: 346.46,
-    change: 8.92,
-    changePercent: 2.64,
-    volume: 45200000,
-    marketCap: 850000000000,
+    companyName: "NVIDIA Corporation",
+    price: 178.88,
+    change: -1.76,
+    changePercent: -0.97,
+    volume: 346926153,
+    marketCap: 4362000000000,
   },
   {
     ticker: "GOOGL",
     companyName: "Alphabet Inc.",
-    price: 166.75,
-    change: 0.85,
-    changePercent: 0.51,
-    volume: 28400000,
-    marketCap: 2100000000000,
+    price: 299.66,
+    change: 10.21,
+    changePercent: 3.53,
+    volume: 74137697,
+    marketCap: 3630000000000,
   },
   {
     ticker: "TSLA",
-    companyName: "Tesla Inc.",
-    price: 248.5,
-    change: -3.21,
-    changePercent: -1.27,
-    volume: 78900000,
-    marketCap: 789000000000,
+    companyName: "Tesla, Inc",
+    price: 391.09,
+    change: -3.95,
+    changePercent: -1.00,
+    volume: 100460633,
+    marketCap: 1301000000000,
   },
   {
     ticker: "AMZN",
-    companyName: "Amazon.com Inc.",
-    price: 155.89,
-    change: 1.67,
-    changePercent: 1.08,
-    volume: 35600000,
-    marketCap: 1600000000000,
+    companyName: "Amazon.com, Inc.",
+    price: 220.69,
+    change: 3.55,
+    changePercent: 1.63,
+    volume: 68490464,
+    marketCap: 2359000000000,
   },
   {
     ticker: "META",
-    companyName: "Meta Platforms Inc.",
-    price: 485.32,
-    change: 5.21,
-    changePercent: 1.09,
-    volume: 18500000,
-    marketCap: 1230000000000,
+    companyName: "Meta Platforms, Inc.",
+    price: 594.25,
+    change: 5.03,
+    changePercent: 0.85,
+    volume: 21052624,
+    marketCap: 1498000000000,
   },
   {
     ticker: "JPM",
     companyName: "JPMorgan Chase & Co.",
-    price: 195.45,
-    change: 2.15,
-    changePercent: 1.11,
-    volume: 12500000,
-    marketCap: 560000000000,
+    price: 298.02,
+    change: -0.36,
+    changePercent: -0.12,
+    volume: 11742526,
+    marketCap: 819482000000,
   },
   {
     ticker: "V",
     companyName: "Visa Inc.",
-    price: 275.83,
-    change: 1.45,
-    changePercent: 0.53,
-    volume: 8500000,
-    marketCap: 590000000000,
+    price: 327.98,
+    change: 4.21,
+    changePercent: 1.30,
+    volume: 8832314,
+    marketCap: 636590000000,
   },
   {
     ticker: "JNJ",
     companyName: "Johnson & Johnson",
-    price: 162.25,
-    change: -0.85,
-    changePercent: -0.52,
-    volume: 9500000,
-    marketCap: 420000000000,
+    price: 203.09,
+    change: 0.83,
+    changePercent: 0.41,
+    volume: 13172196,
+    marketCap: 491255000000,
   },
 ]
 
@@ -138,15 +138,43 @@ export async function GET() {
         try {
           const [quote, info] = await Promise.all([client.getQuote(ticker), client.getCompanyInfo(ticker)])
 
-          return {
+          // Log API values for debugging
+          console.log(`[${ticker}] API Data Received:`, {
+            volume: quote?.volume,
+            volumeFormatted: quote?.volume ? `${(quote.volume / 1e6).toFixed(2)}M` : "N/A",
+            marketCap: info?.marketCap,
+            marketCapFormatted: info?.marketCap 
+              ? (info.marketCap >= 1e12 
+                  ? `${(info.marketCap / 1e12).toFixed(3)}T` 
+                  : info.marketCap >= 1e9 
+                    ? `${(info.marketCap / 1e9).toFixed(3)}B`
+                    : `${info.marketCap}`)
+              : "N/A",
+            source: "Yahoo Finance API"
+          })
+
+          const stockData = {
             ticker,
-            companyName: quote?.ticker?.includes(".") ? ticker : `${ticker} Corp.`,
-            price: quote.currentPrice,
-            change: quote.change,
-            changePercent: quote.changePercent,
-            volume: quote.volume || 0,
+            companyName: DEFAULT_STOCKS.find(s => s.ticker === ticker)?.companyName || quote?.ticker || `${ticker} Corp.`,
+            price: info.price || quote.currentPrice,
+            change: info.change || quote.change,
+            changePercent: info.changePercent || quote.changePercent,
+            // Use volume from quote, fallback to volume from company info, then avgVolume
+            volume: (quote.volume && quote.volume > 0) ? quote.volume : (info.volume || info.avgVolume || 0),
             marketCap: info.marketCap || 0,
           }
+
+          console.log(`[${ticker}] Stock data before validation:`, {
+            volume: stockData.volume,
+            marketCap: stockData.marketCap,
+            marketCapFormatted: stockData.marketCap >= 1e12 
+              ? `${(stockData.marketCap / 1e12).toFixed(3)}T` 
+              : stockData.marketCap >= 1e9 
+                ? `${(stockData.marketCap / 1e9).toFixed(3)}B`
+                : `${stockData.marketCap}`
+          })
+
+          return stockData
         } catch (error) {
           console.warn(`Failed to fetch data for ${ticker}:`, error)
           // Return default data for this ticker
@@ -227,6 +255,15 @@ function validateStockData(stock: any) {
   // Find default stock for this ticker
   const defaultStock = DEFAULT_STOCKS.find((s) => s.ticker === stock.ticker)
 
+  // Helper to format large numbers for logging
+  const formatLargeNumber = (num: number) => {
+    if (num >= 1e12) return `${(num / 1e12).toFixed(2)}T`
+    if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`
+    if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`
+    if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`
+    return num.toString()
+  }
+
   // Ensure price is realistic (between $1 and $10,000)
   const price =
     typeof stock.price === "number" && stock.price >= 1 && stock.price <= 10000
@@ -245,16 +282,27 @@ function validateStockData(stock: any) {
       ? stock.changePercent
       : (change / (price - change)) * 100
 
-  // Ensure volume is positive
-  const volume = typeof stock.volume === "number" && stock.volume > 0 ? stock.volume : defaultStock?.volume || 1000000
+  // Volume validation - trust API data, only fallback if invalid
+  let volume = stock.volume
+  let volumeSource = 'API'
+  
+  if (typeof volume !== "number" || volume <= 0) {
+    // No valid volume from API, use default
+    volume = defaultStock?.volume || 1000000
+    volumeSource = 'default'
+  }
 
-  // Ensure market cap is realistic
-  const marketCap =
-    typeof stock.marketCap === "number" && stock.marketCap > 0
-      ? stock.marketCap
-      : defaultStock?.marketCap || price * volume
+  // Market cap validation - trust API data, only fallback if invalid
+  let marketCap = stock.marketCap
+  let marketCapSource = 'API'
+  
+  if (typeof marketCap !== "number" || marketCap <= 0) {
+    // No valid market cap from API, use default
+    marketCap = defaultStock?.marketCap || 0
+    marketCapSource = 'default'
+  }
 
-  return {
+  const validatedData = {
     ...stock,
     price,
     change,
@@ -262,6 +310,16 @@ function validateStockData(stock: any) {
     volume,
     marketCap,
   }
+
+  // Log the final validated data
+  console.log(`[${stock.ticker}] Final data:`, {
+    price: `$${price.toFixed(2)}`,
+    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`,
+    volume: `${formatLargeNumber(volume)} (${volumeSource})`,
+    marketCap: `${formatLargeNumber(marketCap)} (${marketCapSource})`,
+  })
+
+  return validatedData
 }
 
 // Validate ETF data to ensure it's realistic

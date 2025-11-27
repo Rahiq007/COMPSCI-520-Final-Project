@@ -21,7 +21,7 @@ export class YahooFinanceClient {
 
   async getCompanyInfo(symbol: string) {
     const response = await fetch(
-      `${this.baseUrl}/v10/finance/quoteSummary/${symbol}?modules=summaryProfile,financialData,defaultKeyStatistics`,
+      `${this.baseUrl}/v10/finance/quoteSummary/${symbol}?modules=summaryProfile,financialData,defaultKeyStatistics,summaryDetail,price`,
     )
     if (!response.ok) {
       throw new Error(`Yahoo Finance API error: ${response.statusText}`)
