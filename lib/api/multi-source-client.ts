@@ -24,38 +24,69 @@ export class MultiSourceStockClient {
     this.yahoo = new YahooFinanceClient()
   }
 
-  async getQuote(symbol: string) {
-    // Try sources in order of preference
+  async getQuote(symbol: string, requireVolume = true) {
+    // For live market data, prioritize Yahoo Finance as it provides the most complete data
+    // (price, volume, etc. in a single call)
+    // Other sources like Finnhub don't include volume in their quote endpoint
     const sources = [
-      { name: "finnhub", client: this.finnhub },
-      { name: "polygon", client: this.polygon },
-      { name: "twelveData", client: this.twelveData },
       { name: "yahoo", client: this.yahoo },
+      { name: "twelveData", client: this.twelveData },
+      { name: "polygon", client: this.polygon },
+      { name: "finnhub", client: this.finnhub },
     ]
+
+    let lastValidQuote: any = null
 
     for (const source of sources) {
       if (!source.client) continue
 
       try {
-        console.log(`Trying ${source.name} for quote data...`)
+        console.log(`[${symbol}] Trying ${source.name} for quote data...`)
         const data = await source.client.getQuote(symbol)
 
+        let normalizedQuote: any = null
         if (source.name === "yahoo") {
-          return this.normalizeYahooQuote(data)
+          normalizedQuote = this.normalizeYahooQuote(data)
         } else if (source.name === "finnhub") {
-          return this.normalizeFinnhubQuote(data, symbol)
+          normalizedQuote = this.normalizeFinnhubQuote(data, symbol)
         } else if (source.name === "polygon") {
-          return this.normalizePolygonQuote(data)
+          normalizedQuote = this.normalizePolygonQuote(data)
         } else if (source.name === "twelveData") {
-          return this.normalizeTwelveDataQuote(data)
+          normalizedQuote = this.normalizeTwelveDataQuote(data)
+        }
+
+        if (normalizedQuote) {
+          // Check if the quote has valid price
+          if (!normalizedQuote.currentPrice || normalizedQuote.currentPrice <= 0) {
+            console.warn(`[${symbol}] ${source.name} returned invalid price, trying next source...`)
+            continue
+          }
+
+          // If we require volume and it's missing, save this quote but try next source
+          if (requireVolume && (!normalizedQuote.volume || normalizedQuote.volume <= 0)) {
+            console.warn(`[${symbol}] ${source.name} returned no volume data, trying next source...`)
+            if (!lastValidQuote) {
+              lastValidQuote = normalizedQuote
+            }
+            continue
+          }
+
+          console.log(`[${symbol}] Using ${source.name} quote data (price: $${normalizedQuote.currentPrice.toFixed(2)}, volume: ${normalizedQuote.volume?.toLocaleString() || 'N/A'})`)
+          return normalizedQuote
         }
       } catch (error) {
-        console.warn(`${source.name} failed:`, error)
+        console.warn(`[${symbol}] ${source.name} failed:`, error)
         continue
       }
     }
 
-    throw new Error("All stock data sources failed")
+    // If we have a valid quote without volume, return it as fallback
+    if (lastValidQuote) {
+      console.warn(`[${symbol}] No source provided volume, using best available quote`)
+      return lastValidQuote
+    }
+
+    throw new Error(`All stock data sources failed for ${symbol}`)
   }
 
   async getHistoricalData(symbol: string, days = 365) {
@@ -102,27 +133,56 @@ export class MultiSourceStockClient {
   }
 
   async getCompanyInfo(symbol: string) {
+    // Prioritize Yahoo Finance for company info as it provides more accurate market cap
+    // Finnhub returns market cap in millions which can cause display issues
+    let lastValidInfo: any = null
+
+    // Try Yahoo Finance first (most reliable for market cap)
+    try {
+      console.log(`[${symbol}] Trying Yahoo Finance for company info...`)
+      const data = await this.yahoo.getCompanyInfo(symbol)
+      const normalizedInfo = this.normalizeYahooCompanyInfo(data)
+      
+      // Validate market cap
+      if (normalizedInfo.marketCap && normalizedInfo.marketCap > 0) {
+        console.log(`[${symbol}] Using Yahoo Finance company info (marketCap: ${normalizedInfo.marketCap >= 1e12 ? `${(normalizedInfo.marketCap/1e12).toFixed(2)}T` : normalizedInfo.marketCap >= 1e9 ? `${(normalizedInfo.marketCap/1e9).toFixed(2)}B` : normalizedInfo.marketCap})`)
+        return normalizedInfo
+      } else {
+        console.warn(`[${symbol}] Yahoo Finance returned no market cap, trying next source...`)
+        lastValidInfo = normalizedInfo
+      }
+    } catch (error) {
+      console.warn(`[${symbol}] Yahoo Finance company info failed:`, error)
+    }
+
+    // Fallback to Finnhub
     if (this.finnhub) {
       try {
+        console.log(`[${symbol}] Trying Finnhub for company info...`)
         const [profile, financials] = await Promise.all([
           this.finnhub.getCompanyProfile(symbol),
           this.finnhub.getBasicFinancials(symbol),
         ])
-        return this.normalizeFinnhubCompanyInfo(profile, financials)
+        const normalizedInfo = this.normalizeFinnhubCompanyInfo(profile, financials)
+        
+        if (normalizedInfo.marketCap && normalizedInfo.marketCap > 0) {
+          console.log(`[${symbol}] Using Finnhub company info (marketCap: ${normalizedInfo.marketCap >= 1e12 ? `${(normalizedInfo.marketCap/1e12).toFixed(2)}T` : normalizedInfo.marketCap >= 1e9 ? `${(normalizedInfo.marketCap/1e9).toFixed(2)}B` : normalizedInfo.marketCap})`)
+          return normalizedInfo
+        } else if (!lastValidInfo) {
+          lastValidInfo = normalizedInfo
+        }
       } catch (error) {
-        console.warn("Finnhub company info failed:", error)
+        console.warn(`[${symbol}] Finnhub company info failed:`, error)
       }
     }
 
-    // Fallback to Yahoo Finance
-    try {
-      const data = await this.yahoo.getCompanyInfo(symbol)
-      return this.normalizeYahooCompanyInfo(data)
-    } catch (error) {
-      console.warn("Yahoo Finance company info failed:", error)
+    // Return whatever we have
+    if (lastValidInfo) {
+      console.warn(`[${symbol}] Using partial company info (market cap may be missing)`)
+      return lastValidInfo
     }
 
-    throw new Error("All company info sources failed")
+    throw new Error(`All company info sources failed for ${symbol}`)
   }
 
   async getNews(symbol: string) {
@@ -196,32 +256,51 @@ export class MultiSourceStockClient {
     const meta = result.meta
     const quote = result.indicators.quote[0]
 
-    // Get volume - try multiple sources and find last non-zero value
+    // Get volume - Yahoo Finance chart API provides volume in multiple ways:
+    // 1. meta.regularMarketVolume - the current trading day's total volume (most reliable)
+    // 2. quote.volume[] array - historical volume data for the chart period
+    // 3. Sum of quote.volume[] - if we need to calculate total volume from intraday data
     let volume = 0
     
-    // First try regularMarketVolume (current day's volume)
-    if (meta.regularMarketVolume && meta.regularMarketVolume > 0) {
+    // Primary source: regularMarketVolume from meta (this is the official daily volume)
+    if (typeof meta.regularMarketVolume === 'number' && meta.regularMarketVolume > 0) {
       volume = meta.regularMarketVolume
-    } else if (quote.volume && quote.volume.length > 0) {
-      // Find last non-zero volume from the array (most recent valid value)
-      for (let i = quote.volume.length - 1; i >= 0; i--) {
-        if (quote.volume[i] && quote.volume[i] > 0) {
-          volume = quote.volume[i]
-          break
+      console.log(`[normalizeYahooQuote] ${meta.symbol} - Using regularMarketVolume: ${volume.toLocaleString()}`)
+    } 
+    // Secondary: Sum all volumes from the quote array (for intraday data, this gives total volume)
+    else if (quote.volume && Array.isArray(quote.volume) && quote.volume.length > 0) {
+      // For intraday charts, we may need to sum all volume entries
+      // For daily charts, we can use the last valid entry
+      const validVolumes = quote.volume.filter((v: number | null) => typeof v === 'number' && v > 0)
+      
+      if (validVolumes.length > 0) {
+        // If it's a single day's data (chart period is 1 day), sum all volumes
+        // Otherwise, use the most recent valid volume
+        if (quote.volume.length > 1 && meta.dataGranularity && meta.dataGranularity !== '1d') {
+          // Intraday data - sum all volumes to get daily total
+          volume = validVolumes.reduce((sum: number, v: number) => sum + v, 0)
+          console.log(`[normalizeYahooQuote] ${meta.symbol} - Summed intraday volumes: ${volume.toLocaleString()} (${validVolumes.length} entries)`)
+        } else {
+          // Daily or longer granularity - use the last valid value
+          volume = validVolumes[validVolumes.length - 1]
+          console.log(`[normalizeYahooQuote] ${meta.symbol} - Using last valid volume: ${volume.toLocaleString()}`)
         }
       }
-    } else if (meta.volume && meta.volume > 0) {
+    }
+    // Tertiary: Try meta.volume as last resort
+    else if (typeof meta.volume === 'number' && meta.volume > 0) {
       volume = meta.volume
+      console.log(`[normalizeYahooQuote] ${meta.symbol} - Using meta.volume fallback: ${volume.toLocaleString()}`)
     }
 
-    // Log volume extraction for debugging
-    if (volume > 0) {
-      console.log(`[normalizeYahooQuote] Volume extracted: ${volume.toLocaleString()} for ${meta.symbol}`)
-    } else {
+    // Log warning if no volume found
+    if (volume === 0) {
       console.warn(`[normalizeYahooQuote] No volume found for ${meta.symbol}`, {
-        hasRegularMarketVolume: !!meta.regularMarketVolume,
+        regularMarketVolume: meta.regularMarketVolume,
+        metaVolume: meta.volume,
         hasVolumeArray: !!quote.volume,
-        volumeArrayLength: quote.volume?.length || 0
+        volumeArrayLength: quote.volume?.length || 0,
+        dataGranularity: meta.dataGranularity
       })
     }
 
@@ -315,10 +394,19 @@ export class MultiSourceStockClient {
   }
 
   private normalizeFinnhubCompanyInfo(profile: any, financials: any) {
+    // Finnhub returns marketCapitalization in millions
+    // e.g., Apple with ~3.5T market cap returns ~3500000 (3.5 million millions)
+    // So we need to multiply by 1,000,000 to get actual value
+    let marketCap = profile.marketCapitalization || 0
+    if (marketCap > 0 && marketCap < 1e9) {
+      // Value seems to be in millions, convert to actual value
+      marketCap = marketCap * 1e6
+    }
+
     return {
       pe: financials.metric?.peBasicExclExtraTTM || 0,
       eps: financials.metric?.epsBasicExclExtraTTM || 0,
-      marketCap: profile.marketCapitalization || 0,
+      marketCap: marketCap,
       dividend: financials.metric?.dividendYieldIndicatedAnnual || 0,
       beta: financials.metric?.beta || 1,
       avgVolume: financials.metric?.vol1DayAvg || 0,
@@ -334,7 +422,11 @@ export class MultiSourceStockClient {
   private normalizeYahooCompanyInfo(data: any) {
     const quoteSummary = data.quoteSummary?.result?.[0]
     if (!quoteSummary) {
-      console.warn("Yahoo Finance company info: Invalid response structure")
+      console.warn("Yahoo Finance company info: Invalid response structure", { 
+        hasQuoteSummary: !!data.quoteSummary,
+        hasResult: !!data.quoteSummary?.result,
+        resultLength: data.quoteSummary?.result?.length 
+      })
       return {
         pe: 0,
         eps: 0,
@@ -357,57 +449,116 @@ export class MultiSourceStockClient {
     const summaryDetail = quoteSummary.summaryDetail
     const price = quoteSummary.price
 
-    // Extract market cap - try price module first, then summaryDetail, etc.
-    let marketCap = 0
-    if (price?.marketCap?.raw) {
-      marketCap = price.marketCap.raw
-    } else if (summaryDetail?.marketCap?.raw) {
-      marketCap = summaryDetail.marketCap.raw
-    } else if (defaultKeyStatistics?.marketCap?.raw) {
-      marketCap = defaultKeyStatistics.marketCap.raw
-    } else if (defaultKeyStatistics?.marketCap) {
-      marketCap = typeof defaultKeyStatistics.marketCap === "number" 
-        ? defaultKeyStatistics.marketCap 
-        : 0
-    } else if (summaryProfile?.marketCap) {
-      marketCap = typeof summaryProfile.marketCap === "number"
-        ? summaryProfile.marketCap
-        : 0
+    // Helper to safely extract numeric value from Yahoo Finance response
+    // Yahoo returns values as { raw: number, fmt: string } or just as numbers
+    const extractNumeric = (value: any): number => {
+      if (value === null || value === undefined) return 0
+      if (typeof value === 'number') return value
+      if (typeof value === 'object' && value.raw !== undefined) return value.raw
+      return 0
     }
 
-    // Extract volume - try price module first, then summaryDetail
-    const volume = price?.regularMarketVolume?.raw || summaryDetail?.volume?.raw || summaryDetail?.volume || 0
+    // Extract market cap - try multiple sources in order of reliability
+    // Yahoo Finance quoteSummary API returns market cap in these modules:
+    // 1. price.marketCap - most up-to-date
+    // 2. summaryDetail.marketCap - reliable backup
+    // 3. defaultKeyStatistics.enterpriseValue - approximation if market cap unavailable
+    let marketCap = 0
+    let marketCapSource = ''
+    
+    if (price?.marketCap) {
+      marketCap = extractNumeric(price.marketCap)
+      marketCapSource = 'price.marketCap'
+    }
+    if (marketCap === 0 && summaryDetail?.marketCap) {
+      marketCap = extractNumeric(summaryDetail.marketCap)
+      marketCapSource = 'summaryDetail.marketCap'
+    }
+    if (marketCap === 0 && defaultKeyStatistics?.marketCap) {
+      marketCap = extractNumeric(defaultKeyStatistics.marketCap)
+      marketCapSource = 'defaultKeyStatistics.marketCap'
+    }
+    // Enterprise value as last resort (not exactly market cap but close)
+    if (marketCap === 0 && defaultKeyStatistics?.enterpriseValue) {
+      marketCap = extractNumeric(defaultKeyStatistics.enterpriseValue)
+      marketCapSource = 'defaultKeyStatistics.enterpriseValue (approximation)'
+    }
+
+    // Extract volume from multiple sources
+    let volume = 0
+    let volumeSource = ''
+    
+    if (price?.regularMarketVolume) {
+      volume = extractNumeric(price.regularMarketVolume)
+      volumeSource = 'price.regularMarketVolume'
+    }
+    if (volume === 0 && summaryDetail?.volume) {
+      volume = extractNumeric(summaryDetail.volume)
+      volumeSource = 'summaryDetail.volume'
+    }
+    if (volume === 0 && summaryDetail?.regularMarketVolume) {
+      volume = extractNumeric(summaryDetail.regularMarketVolume)
+      volumeSource = 'summaryDetail.regularMarketVolume'
+    }
+
+    // Extract average volume for fallback
+    let avgVolume = 0
+    if (price?.averageDailyVolume10Day) {
+      avgVolume = extractNumeric(price.averageDailyVolume10Day)
+    } else if (summaryDetail?.averageVolume) {
+      avgVolume = extractNumeric(summaryDetail.averageVolume)
+    } else if (summaryDetail?.averageVolume10days) {
+      avgVolume = extractNumeric(summaryDetail.averageVolume10days)
+    } else if (defaultKeyStatistics?.averageVolume) {
+      avgVolume = extractNumeric(defaultKeyStatistics.averageVolume)
+    }
 
     // Extract price data
-    const currentPrice = price?.regularMarketPrice?.raw || 0
-    const change = price?.regularMarketChange?.raw || 0
-    const changePercent = price?.regularMarketChangePercent?.raw ? price.regularMarketChangePercent.raw * 100 : 0
+    const currentPrice = extractNumeric(price?.regularMarketPrice)
+    const change = extractNumeric(price?.regularMarketChange)
+    // Yahoo returns changePercent as decimal (e.g., 0.0234 for 2.34%)
+    let changePercent = extractNumeric(price?.regularMarketChangePercent)
+    // Convert to percentage if it looks like a decimal
+    if (changePercent !== 0 && Math.abs(changePercent) < 1) {
+      changePercent = changePercent * 100
+    }
 
-    // Log if market cap is extracted successfully
+    // Log extraction results
+    const symbol = price?.symbol || 'UNKNOWN'
     if (marketCap > 0) {
-      console.log(`[normalizeYahooCompanyInfo] Market cap extracted: ${marketCap} (${marketCap >= 1e12 ? `${(marketCap/1e12).toFixed(3)}T` : marketCap >= 1e9 ? `${(marketCap/1e9).toFixed(3)}B` : `${marketCap}`})`)
+      const formatted = marketCap >= 1e12 
+        ? `${(marketCap/1e12).toFixed(2)}T` 
+        : marketCap >= 1e9 
+          ? `${(marketCap/1e9).toFixed(2)}B`
+          : `${(marketCap/1e6).toFixed(2)}M`
+      console.log(`[normalizeYahooCompanyInfo] ${symbol} - Market cap: ${formatted} (source: ${marketCapSource})`)
     } else {
-      console.warn(`[normalizeYahooCompanyInfo] Market cap not found in API response`, {
-        hasPrice: !!price,
-        hasSummaryDetail: !!summaryDetail,
-        priceMarketCap: price?.marketCap?.raw,
-        summaryDetailMarketCap: summaryDetail?.marketCap?.raw
+      console.warn(`[normalizeYahooCompanyInfo] ${symbol} - Market cap not found`, {
+        priceMarketCap: price?.marketCap,
+        summaryDetailMarketCap: summaryDetail?.marketCap,
+        defaultKeyStatsMarketCap: defaultKeyStatistics?.marketCap
       })
     }
 
+    if (volume > 0) {
+      console.log(`[normalizeYahooCompanyInfo] ${symbol} - Volume: ${volume.toLocaleString()} (source: ${volumeSource})`)
+    } else if (avgVolume > 0) {
+      console.log(`[normalizeYahooCompanyInfo] ${symbol} - No current volume, avgVolume: ${avgVolume.toLocaleString()}`)
+    }
+
     return {
-      pe: defaultKeyStatistics?.trailingPE?.raw || summaryDetail?.trailingPE?.raw || 0,
-      eps: defaultKeyStatistics?.trailingEps?.raw || 0,
+      pe: extractNumeric(summaryDetail?.trailingPE) || extractNumeric(defaultKeyStatistics?.trailingPE) || 0,
+      eps: extractNumeric(defaultKeyStatistics?.trailingEps) || 0,
       marketCap: marketCap,
-      dividend: defaultKeyStatistics?.dividendYield?.raw ? defaultKeyStatistics.dividendYield.raw * 100 : (summaryDetail?.dividendYield?.raw ? summaryDetail.dividendYield.raw * 100 : 0),
-      beta: defaultKeyStatistics?.beta?.raw || summaryDetail?.beta?.raw || 1,
-      avgVolume: defaultKeyStatistics?.averageVolume?.raw || summaryDetail?.averageVolume?.raw || 0,
+      dividend: extractNumeric(summaryDetail?.dividendYield) * 100 || extractNumeric(defaultKeyStatistics?.dividendYield) * 100 || 0,
+      beta: extractNumeric(summaryDetail?.beta) || extractNumeric(defaultKeyStatistics?.beta) || 1,
+      avgVolume: avgVolume,
       volume: volume,
       price: currentPrice,
       change: change,
       changePercent: changePercent,
-      fiftyTwoWeekHigh: defaultKeyStatistics?.fiftyTwoWeekHigh?.raw || summaryDetail?.fiftyTwoWeekHigh?.raw || 0,
-      fiftyTwoWeekLow: defaultKeyStatistics?.fiftyTwoWeekLow?.raw || summaryDetail?.fiftyTwoWeekLow?.raw || 0,
+      fiftyTwoWeekHigh: extractNumeric(summaryDetail?.fiftyTwoWeekHigh) || extractNumeric(defaultKeyStatistics?.fiftyTwoWeekHigh) || 0,
+      fiftyTwoWeekLow: extractNumeric(summaryDetail?.fiftyTwoWeekLow) || extractNumeric(defaultKeyStatistics?.fiftyTwoWeekLow) || 0,
     }
   }
 

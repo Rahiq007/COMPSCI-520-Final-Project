@@ -255,6 +255,15 @@ function validateStockData(stock: any) {
   // Find default stock for this ticker
   const defaultStock = DEFAULT_STOCKS.find((s) => s.ticker === stock.ticker)
 
+  // Helper to format large numbers for logging
+  const formatLargeNumber = (num: number) => {
+    if (num >= 1e12) return `${(num / 1e12).toFixed(2)}T`
+    if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`
+    if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`
+    if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`
+    return num.toString()
+  }
+
   // Ensure price is realistic (between $1 and $10,000)
   const price =
     typeof stock.price === "number" && stock.price >= 1 && stock.price <= 10000
@@ -273,60 +282,24 @@ function validateStockData(stock: any) {
       ? stock.changePercent
       : (change / (price - change)) * 100
 
-  // Preserve volume from API if valid, otherwise use default
-  // Volume should be at least thousands (>= 1000) for realistic stock data
-  const volume =
-    typeof stock.volume === "number" && stock.volume >= 1000
-      ? stock.volume
-      : defaultStock?.volume || 1000000
-
-  // Ensure market cap is realistic and preserve API values
-  // Market cap for large caps should be in billions (>= 1B) or trillions
-  // Only use default if API value is missing or clearly invalid (too small)
+  // Volume validation - trust API data, only fallback if invalid
+  let volume = stock.volume
+  let volumeSource = 'API'
   
-  // List of known large cap stocks that should have market cap in billions/trillions
-  const largeCapStocks = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "JPM", "V", "JNJ"]
-  const isLargeCap = largeCapStocks.includes(stock.ticker)
-  
-  let marketCap = stock.marketCap
-
-  if (typeof marketCap !== "number" || marketCap <= 0) {
-    // API didn't provide valid market cap, use default
-    marketCap = defaultStock?.marketCap || 0
-    if (marketCap > 0) {
-      console.log(`[${stock.ticker}] Using default market cap: ${marketCap}`)
-    }
-  } else if (marketCap < 1000000000) {
-    // Market cap is less than 1B
-    if (isLargeCap) {
-      // If market cap is suspiciously small (likely in millions), try scaling it
-      // Yahoo Finance sometimes returns market cap in millions
-      if (marketCap > 100000 && marketCap < 10000000) { // 100k to 10m range
-         const scaledMarketCap = marketCap * 1000000;
-         if (scaledMarketCap > 100000000000) { // If scaled is > 100B
-            console.log(`[${stock.ticker}] ⚠️ Market cap seems scaled in millions (${marketCap}), scaling up to ${scaledMarketCap}`);
-            marketCap = scaledMarketCap;
-         } else {
-            console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
-            marketCap = defaultStock?.marketCap || 0
-         }
-      } else {
-        console.warn(`[${stock.ticker}] ⚠️ Large cap stock but market cap too small (${marketCap}), using default instead`)
-        marketCap = defaultStock?.marketCap || 0
-      }
-    } else if (marketCap < 1000000) {
-      // For other stocks, less than 1M is definitely wrong, use default
-      console.warn(`[${stock.ticker}] Market cap too small (${marketCap}), using default`)
-      marketCap = defaultStock?.marketCap || marketCap
-    }
-    // Otherwise, preserve the value (could be a valid small/mid cap)
+  if (typeof volume !== "number" || volume <= 0) {
+    // No valid volume from API, use default
+    volume = defaultStock?.volume || 1000000
+    volumeSource = 'default'
   }
 
-  // Log if we're preserving API market cap
-  if (typeof stock.marketCap === "number" && stock.marketCap > 0 && marketCap >= 1000000000) {
-    console.log(`[${stock.ticker}] ✅ Using API market cap: ${marketCap} (${(marketCap / 1e12).toFixed(3)}T)`)
-  } else if (marketCap < 1000000000 && marketCap > 0) {
-    console.warn(`[${stock.ticker}] ⚠️ Market cap suspiciously low: ${marketCap} (${(marketCap / 1e6).toFixed(2)}M)`)
+  // Market cap validation - trust API data, only fallback if invalid
+  let marketCap = stock.marketCap
+  let marketCapSource = 'API'
+  
+  if (typeof marketCap !== "number" || marketCap <= 0) {
+    // No valid market cap from API, use default
+    marketCap = defaultStock?.marketCap || 0
+    marketCapSource = 'default'
   }
 
   const validatedData = {
@@ -338,15 +311,12 @@ function validateStockData(stock: any) {
     marketCap,
   }
 
-  console.log(`[${stock.ticker}] Final validated data:`, {
-    volume: validatedData.volume,
-    volumeFormatted: `${(validatedData.volume / 1e6).toFixed(2)}M`,
-    marketCap: validatedData.marketCap,
-    marketCapFormatted: validatedData.marketCap >= 1e12 
-      ? `${(validatedData.marketCap / 1e12).toFixed(3)}T` 
-      : validatedData.marketCap >= 1e9 
-        ? `${(validatedData.marketCap / 1e9).toFixed(3)}B`
-        : `${(validatedData.marketCap / 1e6).toFixed(2)}M`
+  // Log the final validated data
+  console.log(`[${stock.ticker}] Final data:`, {
+    price: `$${price.toFixed(2)}`,
+    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`,
+    volume: `${formatLargeNumber(volume)} (${volumeSource})`,
+    marketCap: `${formatLargeNumber(marketCap)} (${marketCapSource})`,
   })
 
   return validatedData
