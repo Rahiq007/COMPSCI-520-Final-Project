@@ -216,7 +216,7 @@ export default function StockDashboard() {
                     : "Viewing live cryptocurrency market data with trending topics and latest news"}
                 </CardDescription>
               </div>
-              {/* <Button
+              <Button
                 onClick={toggleMode}
                 variant={mode === "crypto" ? "default" : "outline"}
                 size="lg"
@@ -228,7 +228,7 @@ export default function StockDashboard() {
               >
                 <Bitcoin className="mr-2 h-4 w-4" />
                 {mode === "stock" ? "Switch to Crypto" : "Switch to Stocks"}
-              </Button> */}
+              </Button>
             </div>
           </CardHeader>
           {mode === "stock" && (
