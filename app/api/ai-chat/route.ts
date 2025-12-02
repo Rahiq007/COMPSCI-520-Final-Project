@@ -91,6 +91,7 @@ Provide professional, clear, and actionable financial analysis. Keep responses c
               ],
               max_tokens: 1000,
               temperature: 0.3,
+              stream: true,
             }),
           })
 
@@ -106,17 +107,47 @@ Provide professional, clear, and actionable financial analysis. Keep responses c
             return
           }
 
-          const data = await openRouterResponse.json()
-          const aiResponse = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response."
+          const reader = openRouterResponse.body?.getReader()
+          const decoder = new TextDecoder()
 
-          // Send AI response
-          const responseMessage = JSON.stringify({
-            type: "response",
-            response: aiResponse,
-            timestamp: new Date().toISOString(),
-            model: "deepseek/deepseek-chat-v3.1",
-          })
-          controller.enqueue(encoder.encode(`data: ${responseMessage}\n\n`))
+          if (!reader) {
+            throw new Error("Failed to get reader from OpenRouter response")
+          }
+
+          let buffer = ""
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            buffer = lines.pop() || ""
+
+            for (const line of lines) {
+              const trimmedLine = line.trim()
+              if (!trimmedLine || trimmedLine === "data: [DONE]") continue
+
+              if (trimmedLine.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(trimmedLine.slice(6))
+                  const content = data.choices?.[0]?.delta?.content
+
+                  if (content) {
+                    const chunkMessage = JSON.stringify({
+                      type: "chunk",
+                      content: content,
+                      timestamp: new Date().toISOString(),
+                      model: "deepseek/deepseek-chat-v3.1",
+                    })
+                    controller.enqueue(encoder.encode(`data: ${chunkMessage}\n\n`))
+                  }
+                } catch (e) {
+                  console.error("Error parsing OpenRouter chunk:", e)
+                }
+              }
+            }
+          }
+
           controller.close()
         } catch (error: any) {
           console.error("Stream Error:", error)

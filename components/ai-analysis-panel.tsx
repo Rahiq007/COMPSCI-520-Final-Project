@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown"
 import type { Components as ReactMarkdownComponents } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useRef, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -118,6 +118,10 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
   const [chatError, setChatError] = useState<string | null>(null)
   const [isSearchingWeb, setIsSearchingWeb] = useState(false)
   const [isGeneratingResponse, setIsGeneratingResponse] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const prevMessagesLengthRef = useRef(messages.length)
+
+
 
   // Suggested questions for better user experience
   const suggestedQuestions = [
@@ -254,12 +258,12 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                 // Add search results immediately
                 const searchResults: SearchResult[] = Array.isArray(data.searchResults)
                   ? (data.searchResults as Array<{ title?: string; url?: string; description?: string }>)
-                      .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
-                      .map((result) => ({
-                        title: result.title as string,
-                        url: result.url as string,
-                        description: typeof result.description === "string" ? result.description : "",
-                      }))
+                    .filter((result) => typeof result?.title === "string" && typeof result?.url === "string")
+                    .map((result) => ({
+                      title: result.title as string,
+                      url: result.url as string,
+                      description: typeof result.description === "string" ? result.description : "",
+                    }))
                   : []
 
                 if (searchResults.length > 0) {
@@ -277,8 +281,34 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                   setIsSearchingWeb(false)
                   setIsGeneratingResponse(true)
                 }
+              } else if (data.type === "chunk") {
+                // Handle streaming chunks
+                setIsSearchingWeb(false)
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1]
+                  const isAssistantMessage = lastMsg?.role === "assistant" && lastMsg?.id === `${baseId}-assistant`
+
+                  if (isAssistantMessage) {
+                    return [
+                      ...prev.slice(0, -1),
+                      { ...lastMsg, content: lastMsg.content + (data.content || "") }
+                    ]
+                  } else {
+                    return [
+                      ...prev,
+                      {
+                        id: `${baseId}-assistant`,
+                        role: "assistant",
+                        content: data.content || "",
+                        timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+                        model: data.model,
+                      },
+                    ]
+                  }
+                })
+                setIsGeneratingResponse(true)
               } else if (data.type === "response") {
-                // Add AI response after search results
+                // Handle full response (fallback)
                 setMessages((prev) => [
                   ...prev,
                   {
@@ -633,9 +663,8 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                         <div>
                           <div className="text-sm text-gray-600">Potential Return</div>
                           <div
-                            className={`text-xl font-bold ${
-                              calculatePotentialReturn() >= 0 ? "text-green-600" : "text-red-600"
-                            }`}
+                            className={`text-xl font-bold ${calculatePotentialReturn() >= 0 ? "text-green-600" : "text-red-600"
+                              }`}
                           >
                             {calculatePotentialReturn().toFixed(2)}%
                           </div>
@@ -758,7 +787,7 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
             )}
 
             {/* Chat Messages */}
-            <div className="max-h-[500px] overflow-y-auto space-y-5 bg-gray-50 rounded-lg p-6">
+            <div ref={scrollRef} className="max-h-[500px] overflow-y-auto space-y-5 bg-gray-50 rounded-lg p-6">
               {messages.length === 0 && !chatError && (
                 <div className="text-center text-gray-500 py-8">
                   <MessageSquare className="h-8 w-8 mx-auto mb-2 text-gray-400" />
@@ -789,22 +818,17 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                         </div>
                         <div className="px-6 py-5 space-y-4">
                           {message.searchResults?.map((result, index) => (
-                            <div key={`${result.url}-${index}`} className="bg-white rounded-lg border border-blue-100 p-4 shadow-sm">
+                            <div key={`${result.url}-${index}`} className="bg-white rounded-lg border border-blue-100 p-3 shadow-sm hover:bg-blue-50 transition-colors">
                               <a
                                 href={result.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                                className="flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-900"
                               >
-                                <span>
-                                  {index + 1}. {result.title}
-                                </span>
-                                <ExternalLink className="h-3 w-3" />
+                                <span className="flex-shrink-0 text-blue-500 font-bold">{index + 1}.</span>
+                                <span className="truncate">{result.title}</span>
+                                <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-50" />
                               </a>
-                              {result.description && (
-                                <p className="text-xs text-gray-600 mt-2 leading-relaxed">{result.description}</p>
-                              )}
-                              <p className="text-[11px] text-gray-400 mt-1 truncate">{result.url}</p>
                             </div>
                           ))}
                         </div>
@@ -883,7 +907,7 @@ export default function AIAnalysisPanel({ ticker, stockData, onAnalysisComplete 
                           <div className="flex items-center justify-between text-xs text-gray-500">
                             <div className="flex items-center gap-2">
                               <Activity className="h-3 w-3" />
-                              <span>Powered by {message.model||"Groq AI"} - Real-time Analysis</span>
+                              <span>Powered by {message.model || "Groq AI"} - Real-time Analysis</span>
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="flex items-center gap-1">
